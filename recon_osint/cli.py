@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 from pathlib import Path
+from urllib.parse import urlparse
 from .core.config import load_config, get_profile
 from .core.scope import validate_target, normalize_host, ScopeError
 from .core.http_safe import fetch_headers
@@ -10,6 +11,17 @@ from .modules.dns import resolve_dns
 from .modules.headers import analyze_headers
 from .modules.javascript import analyze_javascript
 
+def _validate_js_base_url(value: str, profile: dict) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme.lower() not in ({"https"} if profile.get("https_only") else {"http", "https"}):
+        raise ScopeError("L'URL de base JS doit respecter le schéma autorisé par le profil.")
+    if parsed.username or parsed.password or not parsed.hostname:
+        raise ScopeError("URL de base JS invalide ou contenant des identifiants.")
+    validate_target(parsed.hostname, profile)
+    if parsed.port not in (None, 443):
+        raise ScopeError("L'URL de base JS doit utiliser le port HTTPS standard.")
+    return value
+
 def build_parser():
     p = argparse.ArgumentParser(prog="recon-osint", description="RECON OSINT V4 — reconnaissance encadrée et analyse locale")
     p.add_argument("--config", default="config.json")
@@ -17,6 +29,7 @@ def build_parser():
     p.add_argument("--domain", help="Cible dans le périmètre du profil")
     p.add_argument("--out", default="reports")
     p.add_argument("--js", action="append", default=[], help="Fichier JavaScript local à analyser (analyse hors ligne)")
+    p.add_argument("--js-base-url", help="URL de base explicite, dans le périmètre, pour résoudre les chemins relatifs du JS")
     p.add_argument("--modules", default="all", help="Liste séparée par virgules: ct,dns,headers,js ou all")
     p.add_argument("--confirm-authorized", action="store_true", help="Confirme que tu es autorisé à effectuer les requêtes actives configurées")
     return p
@@ -26,6 +39,7 @@ def run(args=None):
     cfg = load_config(ns.config); profile = get_profile(cfg, ns.profile)
     root = normalize_host(ns.domain or profile.get("root_domain", ""))
     validate_target(root, profile)
+    js_base_url = _validate_js_base_url(ns.js_base_url, profile) if ns.js_base_url else ""
     modules = {x.strip().lower() for x in ns.modules.split(",")}
     if "all" in modules: modules = {"ct", "dns", "headers", "js"}
     unknown = modules - {"ct", "dns", "headers", "js"}
@@ -54,7 +68,7 @@ def run(args=None):
             path = Path(filename)
             try: source = path.read_text(encoding="utf-8", errors="replace")
             except OSError as exc: local.append({"file": filename, "error": type(exc).__name__}); continue
-            local.append({"file": filename, "analysis": analyze_javascript(source, f"https://{root}/")})
+            local.append({"file": filename, "base_url": js_base_url or None, "analysis": analyze_javascript(source, js_base_url)})
         results["javascript"] = local
     summary = {
         "sous-domaines CT": len(results.get("subdomains", {}).get("subdomains", [])) if isinstance(results.get("subdomains"), dict) else 0,
