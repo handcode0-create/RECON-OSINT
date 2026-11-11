@@ -9,9 +9,10 @@ from typing import Any
 
 from ..core.scope import validate_target, ScopeError
 
-SUPPORTED_TOOLS = ("subfinder", "gau", "dnsx", "httpx", "katana", "semgrep")
+SUPPORTED_TOOLS = ("subfinder", "gau", "dnsx", "httpx", "katana", "semgrep", "gitleaks")
 ACTIVE_TOOLS = {"dnsx", "httpx", "katana"}
 PASSIVE_TOOLS = {"subfinder", "gau"}
+LOCAL_TOOLS = {"semgrep", "gitleaks"}
 
 def check_tools() -> dict[str, dict[str, str]]:
     """Return executable availability without running any scan."""
@@ -139,45 +140,65 @@ def run_pipeline(
         "stages": {},
         "scope_filtered": {"hosts": [], "urls": []},
         "policy": {
-            "active_confirmation_received": bool(confirm_authorized),
-            "active_tools_require_confirmation": True,
-            "max_rate": "1 request/second for HTTP crawler/prober defaults",
+            "authorization_confirmation_received": bool(confirm_authorized),
+            "external_tools_require_confirmation": True,
+            "active_tools_require_profile_opt_in": True,
+            "meesho_profile_integrations_disabled": bool(profile.get("integrations_disabled", False)),
         },
     }
 
     def skipped(name: str, reason: str) -> None:
         report["stages"][name] = {"tool": name, "status": "skipped", "reason": reason}
 
+    # Explicit kill switch: Meesho stays inert even if enabled_tools is edited accidentally.
+    if profile.get("integrations_disabled") is True:
+        for name in SUPPORTED_TOOLS:
+            skipped(name, "Intégrations désactivées par le verrouillage explicite du profil.")
+        report["scope_filtered"]["hosts"] = [root]
+        report["summary"] = {"hosts_in_scope": 1, "archived_urls": 0, "live_web_urls": 0, "semgrep_findings": None, "gitleaks_findings": None}
+        return report
+
     hosts = [root]
-    # Passive source collection is opt-in per profile, with no target HTTP requests.
+    # Passive sources query third-party APIs and require profile opt-in plus CLI confirmation.
     if "subfinder" in enabled:
-        result = _execute("subfinder", ["-d", root, "-silent", "-max-time", "3", "-timeout", "10"], directory, 75)
+        if not confirm_authorized:
+            skipped("subfinder", "Ajoutez --confirm-authorized après validation du périmètre.")
+        elif profile.get("allow_passive_integrations") is not True:
+            skipped("subfinder", "allow_passive_integrations=true requis dans le profil.")
+        else:
+            result = _execute("subfinder", ["-d", root, "-silent", "-max-time", "1", "-timeout", "10"], directory, 75)
         stdout = result.pop("stdout", "")
         names = _scope_filter_hosts(_lines(stdout, int(profile.get("max_results", 100))), profile, int(profile.get("max_hosts", 50)))
         result["count"] = len(names)
         result["hosts_file"] = str(directory / "subfinder-hosts.txt")
         (directory / "subfinder-hosts.txt").write_text("\n".join(names), encoding="utf-8")
         report["stages"]["subfinder"] = result
-        hosts = sorted(set(hosts + names))
-    elif "subfinder" not in enabled:
-        skipped("subfinder", "subfinder absent de profile.enabled_tools")
+            hosts = sorted(set(hosts + names))
+    else:
+        skipped("subfinder", "subfinder absent or not enabled in profile")
 
+    archived_urls = []
     if "gau" in enabled:
-        providers = profile.get("gau_providers", ["wayback"])
-        if not providers or not all(p in {"wayback", "commoncrawl", "otx", "urlscan"} for p in providers):
-            skipped("gau", "Liste gau_providers invalide.")
+        if not confirm_authorized:
+            skipped("gau", "Ajoutez --confirm-authorized après validation du périmètre.")
+        elif profile.get("allow_passive_integrations") is not True:
+            skipped("gau", "allow_passive_integrations=true requis dans le profil.")
         else:
-            args = ["--threads", "1", "--timeout", "10", "--retries", "0", "--providers", ",".join(providers), root]
-            if profile.get("include_subdomains") is True:
-                args.insert(-1, "--subs")
-            result = _execute("gau", args, directory, 90)
-            stdout = result.pop("stdout", "")
-            urls = _scope_filter_urls(_lines(stdout, int(profile.get("max_urls", 500))), profile, int(profile.get("max_urls", 500)))
-            result["count"] = len(urls)
-            result["urls_file"] = str(directory / "gau-urls.txt")
-            (directory / "gau-urls.txt").write_text("\n".join(urls), encoding="utf-8")
-            report["stages"]["gau"] = result
-            report["scope_filtered"]["urls"] = urls
+            providers = profile.get("gau_providers", ["wayback"])
+            if not providers or not all(p in {"wayback", "commoncrawl", "otx", "urlscan"} for p in providers):
+                skipped("gau", "Liste gau_providers invalide.")
+            else:
+                args = ["--threads", "1", "--timeout", "10", "--retries", "0", "--providers", ",".join(providers)]
+                if profile.get("include_subdomains") is True:
+                    args.append("--subs")
+                args.append(root)
+                result = _execute("gau", args, directory, 90)
+                stdout = result.pop("stdout", "")
+                archived_urls = _scope_filter_urls(_lines(stdout, int(profile.get("max_urls", 500))), profile, int(profile.get("max_urls", 500)))
+                result["count"] = len(archived_urls)
+                result["urls_file"] = str(directory / "gau-urls.txt")
+                (directory / "gau-urls.txt").write_text("\n".join(archived_urls), encoding="utf-8")
+                report["stages"]["gau"] = result
     else:
         skipped("gau", "gau absent de profile.enabled_tools")
 
@@ -212,13 +233,12 @@ def run_pipeline(
             result = _execute("httpx", args, directory, int(profile.get("httpx_timeout_seconds", 120)))
             stdout = result.pop("stdout", "")
             rows = _jsonl(stdout)
-            for row in rows:
-                url = row.get("url")
-                if isinstance(url, str):
-                    alive_urls.append(url)
-            alive_urls = _scope_filter_urls(alive_urls, profile, int(profile.get("max_web_targets", 5)))
-            result["records"] = rows[:int(profile.get("max_results", 100))]
-            result["count"] = len(rows)
+            raw_urls = [row["url"] for row in rows if isinstance(row.get("url"), str)]
+            alive_urls = _scope_filter_urls(raw_urls, profile, int(profile.get("max_web_targets", 5)))
+            allowed_urls = set(alive_urls)
+            scoped_rows = [row for row in rows if isinstance(row.get("url"), str) and row.get("url") in allowed_urls]
+            result["records"] = scoped_rows[:int(profile.get("max_results", 100))]
+            result["count"] = len(scoped_rows)
             result["in_scope_urls"] = alive_urls
             report["stages"]["httpx"] = result
     else:
@@ -234,12 +254,18 @@ def run_pipeline(
             url_file.write_text("\n".join(alive_urls), encoding="utf-8")
             args = [
                 "-list", str(url_file), "-jsonl", "-silent", "-d", "2", "-c", "1", "-p", "1",
-                "-rl", "1", "-rlm", "30", "-jc", "-fs", "fqdn", "-ct", "30s",
+                "-rl", "1", "-rlm", "20", "-jc", "-fs", "fqdn", "-ct", "30s", "-mrs", "1048576",
             ]
             result = _execute("katana", args, directory, int(profile.get("katana_timeout_seconds", 90)))
             stdout = result.pop("stdout", "")
             rows = _jsonl(stdout)
-            report["stages"]["katana"] = {**result, "count": len(rows), "records": rows[:int(profile.get("max_results", 100))]}
+            scoped_rows = []
+            for row in rows:
+                request = row.get("request") if isinstance(row.get("request"), dict) else {}
+                endpoint = request.get("endpoint") or row.get("endpoint") or row.get("url")
+                if isinstance(endpoint, str) and _scope_filter_urls([endpoint], profile, 1):
+                    scoped_rows.append(row)
+            report["stages"]["katana"] = {**result, "count": len(scoped_rows), "records": scoped_rows[:int(profile.get("max_results", 100))]}
     else:
         skipped("katana", "katana absent de profile.enabled_tools")
 
@@ -269,11 +295,35 @@ def run_pipeline(
     else:
         skipped("semgrep", "semgrep absent de profile.enabled_tools")
 
+    if "gitleaks" in enabled:
+        if not source_dir:
+            skipped("gitleaks", "Fournir --source-dir pour analyser un dépôt ou dossier local.")
+        else:
+            path = Path(source_dir).resolve()
+            if not path.exists():
+                skipped("gitleaks", "Le chemin local est introuvable.")
+            else:
+                report_path = directory / "gitleaks.json"
+                args = ["dir", "--report-format", "json", "--report-path", str(report_path), "--redact", "--no-banner", str(path)]
+                result = _execute("gitleaks", args, directory, int(profile.get("gitleaks_timeout_seconds", 180)))
+                try:
+                    payload = json.loads(report_path.read_text(encoding="utf-8"))
+                    result["findings_count"] = len(payload) if isinstance(payload, list) else None
+                    result["report_file"] = str(report_path)
+                except (OSError, json.JSONDecodeError):
+                    result["findings_count"] = None
+                result.pop("stdout", None)
+                report["stages"]["gitleaks"] = result
+    else:
+        skipped("gitleaks", "gitleaks absent de profile.enabled_tools")
+
     report["scope_filtered"]["hosts"] = hosts
+    report["scope_filtered"]["urls"] = archived_urls
     report["summary"] = {
         "hosts_in_scope": len(hosts),
-        "archived_urls": len(report.get("scope_filtered", {}).get("urls", [])),
+        "archived_urls": len(archived_urls),
         "live_web_urls": len(alive_urls),
         "semgrep_findings": report.get("stages", {}).get("semgrep", {}).get("findings_count"),
+        "gitleaks_findings": report.get("stages", {}).get("gitleaks", {}).get("findings_count"),
     }
     return report
