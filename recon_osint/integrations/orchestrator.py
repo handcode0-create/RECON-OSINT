@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 from typing import Any
+from functools import lru_cache
 
 from ..core.scope import validate_target, ScopeError
 
@@ -14,13 +15,44 @@ ACTIVE_TOOLS = {"dnsx", "httpx", "katana"}
 PASSIVE_TOOLS = {"subfinder", "gau"}
 LOCAL_TOOLS = {"semgrep", "gitleaks"}
 
+_TOOL_SIGNATURES = {
+    "subfinder": (["-h"], ["subfinder", "-d", "-silent"]),
+    "gau": (["--help"], ["--providers", "--threads"]),
+    "dnsx": (["-h"], ["dnsx", "-aaaa", "-a"]),
+    "httpx": (["-h"], ["http toolkit", "-td", "-sc"]),
+    "katana": (["-h"], ["crawling and spidering", "-jsonl", "-fs"]),
+    "semgrep": (["--help"], ["semgrep", "scan"]),
+    "gitleaks": (["--help"], ["gitleaks", "dir", "--report-format"]),
+}
+
+@lru_cache(maxsize=32)
+def _is_expected_binary(tool: str, binary: str) -> bool:
+    """Identify the expected upstream CLI, not merely any same-named executable."""
+    args, markers = _TOOL_SIGNATURES[tool]
+    try:
+        result = subprocess.run(
+            [binary, *args], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=5,
+            check=False, shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    help_text = ((result.stdout or "") + "\\n" + (result.stderr or "")).lower()
+    return all(marker.lower() in help_text for marker in markers)
+
 def check_tools() -> dict[str, dict[str, str]]:
-    """Return executable availability without running any scan."""
+    """Check PATH and binary identity only; no target requests or scans are made."""
     found = {}
     for name in SUPPORTED_TOOLS:
         path = shutil.which(name)
-        found[name] = {"status": "installed" if path else "missing", "path": path or ""}
+        if not path:
+            found[name] = {"status": "missing", "path": ""}
+        elif _is_expected_binary(name, path):
+            found[name] = {"status": "installed", "path": path}
+        else:
+            found[name] = {"status": "incompatible_binary", "path": path, "reason": "Le programme trouvé ne correspond pas à la CLI attendue."}
     return found
+
 
 def _lines(text: str, limit: int) -> list[str]:
     out = []
@@ -49,6 +81,8 @@ def _execute(tool: str, args: list[str], out_dir: Path, timeout: int) -> dict[st
     binary = shutil.which(tool)
     if not binary:
         return {"tool": tool, "status": "missing", "reason": f"Exécutable introuvable dans PATH: {tool}"}
+    if not _is_expected_binary(tool, binary):
+        return {"tool": tool, "status": "incompatible_binary", "reason": "Le binaire trouvé ne correspond pas à l'outil attendu ; aucun scan lancé."}
     try:
         completed = subprocess.run(
             [binary, *args],
