@@ -14,7 +14,7 @@ Plateforme Python qui orchestre des outils open source spécialisés, normalise 
 | [Semgrep](https://github.com/semgrep/semgrep) | Analyse statique du code local | Local |
 | [Gitleaks](https://github.com/gitleaks/gitleaks) | Recherche de secrets dans un dépôt/dossier local | Local |
 
-RECON OSINT ne réécrit pas ces outils : il vérifie leur présence dans `PATH`, lance des arguments prédéfinis sans shell, applique des délais, filtre les hôtes/URL hors périmètre et rassemble les sorties JSON/texte.
+RECON OSINT ne réécrit pas ces outils : il vérifie leur présence dans `PATH` et leur signature CLI avant toute exécution (ce qui évite notamment de confondre le client HTTP Python `httpx` avec le scanner HTTP de ProjectDiscovery). Il lance des arguments prédéfinis sans shell, applique des délais, filtre les hôtes/URL hors périmètre et rassemble les sorties JSON/texte.
 
 ## Installation Python (Windows PowerShell)
 
@@ -82,7 +82,7 @@ Le profil `meesho_root` de ce dépôt utilise `integrations_disabled: true`, `en
 
 - Aucun module d'exploitation, brute force, fuzzing, test de charge ou DoS n'est orchestré.
 - Subfinder et gau interrogent des services tiers ; ils restent désactivés tant que le profil ne les autorise pas explicitement.
-- dnsx, httpx et Katana ne s'exécutent que dans un profil non passif, avec les interrupteurs propres au module et `--confirm-authorized`.
+- dnsx, httpx et Katana ne s'exécutent que dans un profil non passif, avec les interrupteurs propres au module et `--confirm-authorized`. Pour httpx, les entrées et résultats sont limités à HTTPS/443 lorsque `https_only=true`.
 - Les hôtes et URL renvoyés par les outils sont revalidés contre le domaine du profil avant réutilisation. Les résultats HTTP et Katana hors périmètre sont exclus des données structurées du rapport.
 - Katana est limité à la profondeur 2, un worker, un input à la fois, 1 requête/seconde, 20 requêtes/minute et 30 secondes. Ces plafonds ne garantissent pas l'absence d'impact : respecte les règles de l'actif.
 - Les observations sont des pistes et non des vulnérabilités confirmées ; les vérifier manuellement avant tout rapport.
