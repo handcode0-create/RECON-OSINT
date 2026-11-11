@@ -75,7 +75,7 @@ class IntegrationPolicyTests(unittest.TestCase):
             return r"C:\\fake\\httpx.exe" if name == "httpx" else None
         wrong_cli = CompletedProcess(args=["httpx", "-h"], returncode=0,
             stdout="HTTPX - A next generation HTTP client -j --json", stderr="")
-        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \\
+        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \
              patch("recon_osint.integrations.orchestrator.subprocess.run", return_value=wrong_cli):
             result = check_tools()
         self.assertEqual(result["httpx"]["status"], "incompatible_binary")
@@ -86,7 +86,7 @@ class IntegrationPolicyTests(unittest.TestCase):
             return r"C:\\tools\\pd-httpx.exe" if name == "httpx" else None
         expected_cli = CompletedProcess(args=["httpx", "-h"], returncode=0,
             stdout="httpx is a fast and multi-purpose HTTP toolkit -td -sc", stderr="")
-        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \\
+        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \
              patch("recon_osint.integrations.orchestrator.subprocess.run", return_value=expected_cli):
             result = check_tools()
         self.assertEqual(result["httpx"]["status"], "installed")
@@ -98,7 +98,7 @@ class IntegrationPolicyTests(unittest.TestCase):
         expected_cli = CompletedProcess(args=["katana", "-h"], returncode=0,
             stdout="Katana is a fast crawler focused on execution in automation pipelines -j, -jsonl -fs, -field-scope",
             stderr="")
-        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \\
+        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \
              patch("recon_osint.integrations.orchestrator.subprocess.run", return_value=expected_cli):
             result = check_tools()
         self.assertEqual(result["katana"]["status"], "installed")
