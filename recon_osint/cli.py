@@ -25,7 +25,7 @@ def _validate_js_base_url(value: str, profile: dict) -> str:
     return value
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="recon-osint", description="RECON OSINT V4 — reconnaissance encadrée et analyse locale")
+    p = argparse.ArgumentParser(prog="recon-osint", description="RECON OSINT V4.1 — orchestration open source encadrée et analyse locale")
     p.add_argument("--config", default="config.json")
     p.add_argument("--profile", required=True)
     p.add_argument("--domain", help="Cible dans le périmètre du profil")
