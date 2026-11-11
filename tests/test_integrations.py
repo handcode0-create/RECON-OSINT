@@ -91,6 +91,11 @@ class IntegrationPolicyTests(unittest.TestCase):
             result = check_tools()
         self.assertEqual(result["httpx"]["status"], "installed")
 
+    def test_https_only_scope_filter_rejects_http_results(self):
+        profile = {"root_domain": "example.com", "include_subdomains": True, "https_only": True}
+        urls = ["http://example.com/plain", "https://example.com/secure"]
+        self.assertEqual(_scope_filter_urls(urls, profile, 10, require_https=True), ["https://example.com/secure"])
+
     def test_url_filter_rejects_out_of_scope_and_invalid_urls(self):
         profile = {"root_domain": "example.com", "include_subdomains": True}
         urls = [
