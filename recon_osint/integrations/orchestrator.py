@@ -286,8 +286,8 @@ def run_pipeline(
         else:
             path = Path(source_dir).resolve()
             rules = Path(semgrep_config).resolve()
-            if not path.is_dir() or not rules.is_file():
-                skipped("semgrep", "Le dossier source ou le fichier de règles local est introuvable.")
+            if not path.is_dir() or not rules.exists():
+                skipped("semgrep", "Le dossier source ou le chemin de règles local est introuvable.")
             else:
                 report_path = directory / "semgrep.json"
                 args = ["scan", "--config", str(rules), "--json", "--output", str(report_path), str(path)]
