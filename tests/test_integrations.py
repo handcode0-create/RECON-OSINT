@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from unittest.mock import patch
-from recon_osint.integrations.orchestrator import run_pipeline, _scope_filter_urls
+from recon_osint.integrations.orchestrator import run_pipeline, _scope_filter_urls, check_tools
 
 class IntegrationPolicyTests(unittest.TestCase):
     def test_meesho_profile_kill_switch_blocks_every_external_tool(self):
@@ -68,6 +68,28 @@ class IntegrationPolicyTests(unittest.TestCase):
             with patch("recon_osint.integrations.orchestrator._execute", side_effect=fake_execute):
                 result = run_pipeline(profile, "example.com", tmp, confirm_authorized=True)
         self.assertEqual(result["scope_filtered"]["hosts"], ["api.example.com", "example.com", "www.example.com"])
+
+    def test_httpx_name_collision_is_detected(self):
+        from subprocess import CompletedProcess
+        def fake_which(name):
+            return r"C:\\fake\\httpx.exe" if name == "httpx" else None
+        wrong_cli = CompletedProcess(args=["httpx", "-h"], returncode=0,
+            stdout="HTTPX - A next generation HTTP client -j --json", stderr="")
+        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \\
+             patch("recon_osint.integrations.orchestrator.subprocess.run", return_value=wrong_cli):
+            result = check_tools()
+        self.assertEqual(result["httpx"]["status"], "incompatible_binary")
+
+    def test_projectdiscovery_httpx_signature_is_accepted(self):
+        from subprocess import CompletedProcess
+        def fake_which(name):
+            return r"C:\\tools\\pd-httpx.exe" if name == "httpx" else None
+        expected_cli = CompletedProcess(args=["httpx", "-h"], returncode=0,
+            stdout="httpx is a fast and multi-purpose HTTP toolkit -td -sc", stderr="")
+        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \\
+             patch("recon_osint.integrations.orchestrator.subprocess.run", return_value=expected_cli):
+            result = check_tools()
+        self.assertEqual(result["httpx"]["status"], "installed")
 
     def test_url_filter_rejects_out_of_scope_and_invalid_urls(self):
         profile = {"root_domain": "example.com", "include_subdomains": True}
