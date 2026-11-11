@@ -104,9 +104,49 @@ class IntegrationPolicyTests(unittest.TestCase):
         self.assertEqual(result["katana"]["status"], "installed")
 
     def test_https_only_scope_filter_rejects_http_results(self):
-        profile = {"root_domain": "example.com", "include_subdomains": True, "https_only": True}
+        profile = {"root_domain": "example.com", "include_subdomains": True, "https_only": True, "target_port": 443}
         urls = ["http://example.com/plain", "https://example.com/secure"]
         self.assertEqual(_scope_filter_urls(urls, profile, 10, require_https=True), ["https://example.com/secure"])
+
+    def test_custom_port_is_allowed_only_when_it_matches_the_entered_target(self):
+        profile = {"root_domain": "example.com", "include_subdomains": False, "target_port": 8080}
+        self.assertEqual(_scope_filter_urls(["http://example.com:8080/app", "http://example.com:8081/admin"], profile, 10),
+            ["http://example.com:8080/app"])
+
+    def test_ip_target_skips_domain_tools_and_runs_web_tools(self):
+        profile = {
+            "root_domain": "192.0.2.10",
+            "include_subdomains": False,
+            "mode": "authorized_lab",
+            "integrations_disabled": False,
+            "allow_passive_integrations": True,
+            "enabled_tools": ["subfinder", "gau", "dnsx", "httpx", "katana"],
+            "dns_enabled": True,
+            "active_http_enabled": True,
+            "active_crawl_enabled": True,
+            "allow_private_targets": True,
+            "target_port": 443,
+            "max_hosts": 5,
+            "max_results": 10,
+            "max_web_targets": 2,
+            "https_only": True,
+        }
+        calls = []
+        def fake_execute(tool, args, out_dir, timeout):
+            calls.append(tool)
+            if tool == "httpx":
+                return {"tool": tool, "status": "ok", "stdout": '{"url":"https://192.0.2.10/"}\\n'}
+            return {"tool": tool, "status": "ok", "stdout": ""}
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("recon_osint.integrations.orchestrator.check_tools", return_value={}), \\
+                 patch("recon_osint.integrations.orchestrator._execute", side_effect=fake_execute):
+                result = run_pipeline(profile, "192.0.2.10", tmp, confirm_authorized=True,
+                    seed_url="https://192.0.2.10/")
+        self.assertEqual(calls, ["httpx", "katana"])
+        self.assertEqual(result["stages"]["subfinder"]["status"], "skipped")
+        self.assertEqual(result["stages"]["gau"]["status"], "skipped")
+        self.assertEqual(result["stages"]["dnsx"]["status"], "skipped")
+        self.assertEqual(result["stages"]["httpx"]["count"], 1)
 
     def test_url_filter_rejects_out_of_scope_and_invalid_urls(self):
         profile = {"root_domain": "example.com", "include_subdomains": True}
