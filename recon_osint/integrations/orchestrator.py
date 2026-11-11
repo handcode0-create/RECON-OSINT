@@ -159,7 +159,10 @@ def run_pipeline(
         return report
 
     hosts = [root]
-    # Passive sources query third-party APIs and require profile opt-in plus CLI confirmation.
+    max_results = int(profile.get("max_results", 100))
+    max_hosts = int(profile.get("max_hosts", 20))
+    max_urls = int(profile.get("max_urls", 300))
+
     if "subfinder" in enabled:
         if not confirm_authorized:
             skipped("subfinder", "Ajoutez --confirm-authorized après validation du périmètre.")
@@ -167,17 +170,17 @@ def run_pipeline(
             skipped("subfinder", "allow_passive_integrations=true requis dans le profil.")
         else:
             result = _execute("subfinder", ["-d", root, "-silent", "-max-time", "1", "-timeout", "10"], directory, 75)
-        stdout = result.pop("stdout", "")
-        names = _scope_filter_hosts(_lines(stdout, int(profile.get("max_results", 100))), profile, int(profile.get("max_hosts", 50)))
-        result["count"] = len(names)
-        result["hosts_file"] = str(directory / "subfinder-hosts.txt")
-        (directory / "subfinder-hosts.txt").write_text("\n".join(names), encoding="utf-8")
-        report["stages"]["subfinder"] = result
+            stdout = result.pop("stdout", "")
+            names = _scope_filter_hosts(_lines(stdout, max_results), profile, max_hosts)
+            result["count"] = len(names)
+            result["hosts_file"] = str(directory / "subfinder-hosts.txt")
+            (directory / "subfinder-hosts.txt").write_text("\\n".join(names), encoding="utf-8")
+            report["stages"]["subfinder"] = result
             hosts = sorted(set(hosts + names))
     else:
-        skipped("subfinder", "subfinder absent or not enabled in profile")
+        skipped("subfinder", "subfinder absent de profile.enabled_tools")
 
-    archived_urls = []
+    archived_urls: list[str] = []
     if "gau" in enabled:
         if not confirm_authorized:
             skipped("gau", "Ajoutez --confirm-authorized après validation du périmètre.")
@@ -194,10 +197,10 @@ def run_pipeline(
                 args.append(root)
                 result = _execute("gau", args, directory, 90)
                 stdout = result.pop("stdout", "")
-                archived_urls = _scope_filter_urls(_lines(stdout, int(profile.get("max_urls", 500))), profile, int(profile.get("max_urls", 500)))
+                archived_urls = _scope_filter_urls(_lines(stdout, max_urls), profile, max_urls)
                 result["count"] = len(archived_urls)
                 result["urls_file"] = str(directory / "gau-urls.txt")
-                (directory / "gau-urls.txt").write_text("\n".join(archived_urls), encoding="utf-8")
+                (directory / "gau-urls.txt").write_text("\\n".join(archived_urls), encoding="utf-8")
                 report["stages"]["gau"] = result
     else:
         skipped("gau", "gau absent de profile.enabled_tools")
