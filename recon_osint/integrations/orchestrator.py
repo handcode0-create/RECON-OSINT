@@ -82,6 +82,10 @@ def _execute(tool: str, args: list[str], out_dir: Path, timeout: int) -> dict[st
 def _host_from_url(value: str) -> str | None:
     try:
         parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or parsed.username or parsed.password:
+            return None
+        if parsed.port not in (None, 80, 443):
+            return None
         return parsed.hostname
     except ValueError:
         return None
@@ -97,12 +101,14 @@ def _scope_filter_hosts(values: list[str], profile: dict, limit: int) -> list[st
             break
     return sorted(accepted)
 
-def _scope_filter_urls(values: list[str], profile: dict, limit: int) -> list[str]:
+def _scope_filter_urls(values: list[str], profile: dict, limit: int, *, require_https: bool = False) -> list[str]:
     accepted = []
     seen = set()
     for value in values:
         host = _host_from_url(value)
         if not host:
+            continue
+        if require_https and not value.lower().startswith("https://"):
             continue
         try:
             validate_target(host, profile)
@@ -228,16 +234,16 @@ def run_pipeline(
             skipped("httpx", "Requiert mode non passif, active_http_enabled=true et --confirm-authorized.")
         else:
             host_file = directory / "httpx-input.txt"
-            host_file.write_text("\n".join(hosts[:int(profile.get("max_hosts", 20))]), encoding="utf-8")
+            host_file.write_text("\n".join(f"https://{host}" for host in hosts[:int(profile.get("max_hosts", 20))]), encoding="utf-8")
             args = [
-                "-l", str(host_file), "-json", "-silent", "-sc", "-title", "-td", "-server", "-ip", "-cname",
-                "-rl", "1", "-threads", "1", "-timeout", "5", "-retries", "0", "-no-fallback",
+                "-l", str(host_file), "-ports", "https:443", "-json", "-silent", "-sc", "-title", "-td", "-server", "-ip", "-cname",
+                "-rl", "1", "-threads", "1", "-timeout", "5", "-retries", "0",
             ]
             result = _execute("httpx", args, directory, int(profile.get("httpx_timeout_seconds", 120)))
             stdout = result.pop("stdout", "")
             rows = _jsonl(stdout)
             raw_urls = [row["url"] for row in rows if isinstance(row.get("url"), str)]
-            alive_urls = _scope_filter_urls(raw_urls, profile, int(profile.get("max_web_targets", 5)))
+            alive_urls = _scope_filter_urls(raw_urls, profile, int(profile.get("max_web_targets", 5)), require_https=bool(profile.get("https_only", True)))
             allowed_urls = set(alive_urls)
             scoped_rows = [row for row in rows if isinstance(row.get("url"), str) and row.get("url") in allowed_urls]
             result["records"] = scoped_rows[:int(profile.get("max_results", 100))]
@@ -266,7 +272,7 @@ def run_pipeline(
             for row in rows:
                 request = row.get("request") if isinstance(row.get("request"), dict) else {}
                 endpoint = request.get("endpoint") or row.get("endpoint") or row.get("url")
-                if isinstance(endpoint, str) and _scope_filter_urls([endpoint], profile, 1):
+                if isinstance(endpoint, str) and _scope_filter_urls([endpoint], profile, 1, require_https=bool(profile.get("https_only", True))):
                     scoped_rows.append(row)
             report["stages"]["katana"] = {**result, "count": len(scoped_rows), "records": scoped_rows[:int(profile.get("max_results", 100))]}
     else:
