@@ -138,7 +138,7 @@ class IntegrationPolicyTests(unittest.TestCase):
                 return {"tool": tool, "status": "ok", "stdout": '{"url":"https://192.0.2.10/"}\n'}
             return {"tool": tool, "status": "ok", "stdout": ""}
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("recon_osint.integrations.orchestrator.check_tools", return_value={}), \\
+            with patch("recon_osint.integrations.orchestrator.check_tools", return_value={}), \
                  patch("recon_osint.integrations.orchestrator._execute", side_effect=fake_execute):
                 result = run_pipeline(profile, "192.0.2.10", tmp, confirm_authorized=True,
                     seed_url="https://192.0.2.10/")
