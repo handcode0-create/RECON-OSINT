@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import ipaddress
+import socket
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,7 +10,7 @@ from urllib.parse import urlsplit
 from typing import Any
 from functools import lru_cache
 
-from ..core.scope import validate_target, ScopeError
+from ..core.scope import validate_target, ScopeError, is_ip_address
 
 SUPPORTED_TOOLS = ("subfinder", "gau", "dnsx", "httpx", "katana", "semgrep", "gitleaks")
 ACTIVE_TOOLS = {"dnsx", "httpx", "katana"}
@@ -118,11 +120,26 @@ def _host_from_url(value: str) -> str | None:
         parsed = urlsplit(value)
         if parsed.scheme.lower() not in {"http", "https"} or parsed.username or parsed.password:
             return None
-        if parsed.port not in (None, 80, 443):
+        port = parsed.port
+        if port is not None and not 1 <= port <= 65535:
             return None
         return parsed.hostname
     except ValueError:
         return None
+
+def _network_host_allowed(host: str, profile: dict) -> bool:
+    """Require an explicit per-run opt-in before HTTP requests reach non-global IPs."""
+    if profile.get("allow_private_targets") is True:
+        return True
+    try:
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)]
+        except OSError:
+            return True
+    return bool(addresses) and all(address.is_global for address in addresses)
+
 
 def _scope_filter_hosts(values: list[str], profile: dict, limit: int) -> list[str]:
     accepted = set()
@@ -145,6 +162,14 @@ def _scope_filter_urls(values: list[str], profile: dict, limit: int, *, require_
         if require_https and not value.lower().startswith("https://"):
             continue
         try:
+            parsed = urlsplit(value)
+            actual_port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        except ValueError:
+            continue
+        allowed_port = profile.get("target_port")
+        if allowed_port is not None and actual_port != int(allowed_port):
+            continue
+        try:
             validate_target(host, profile)
         except ScopeError:
             continue
@@ -162,9 +187,13 @@ def run_pipeline(
     confirm_authorized: bool = False,
     source_dir: str | Path | None = None,
     semgrep_config: str | Path | None = None,
+    seed_url: str | None = None,
 ) -> dict[str, Any]:
-    """Run only explicitly enabled adapters, with strict scope and low-rate defaults."""
+    """Run enabled adapters against one per-execution target and its explicit scope."""
     root = validate_target(target, profile)
+    target_is_ip = is_ip_address(root)
+    if seed_url is None:
+        seed_url = f"https://{root}/"
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)
     enabled = set(profile.get("enabled_tools", []))
@@ -174,6 +203,8 @@ def run_pipeline(
 
     report: dict[str, Any] = {
         "target": root,
+        "seed_url": seed_url,
+        "target_type": "ip" if target_is_ip else "domain",
         "mode": profile.get("mode", "unknown"),
         "enabled_tools": sorted(enabled),
         "tool_checks": check_tools(),
@@ -204,7 +235,9 @@ def run_pipeline(
     max_urls = int(profile.get("max_urls", 300))
 
     if "subfinder" in enabled:
-        if not confirm_authorized:
+        if target_is_ip:
+            skipped("subfinder", "Subfinder travaille sur les domaines, pas sur une adresse IP.")
+        elif not confirm_authorized:
             skipped("subfinder", "Ajoutez --confirm-authorized après validation du périmètre.")
         elif profile.get("allow_passive_integrations") is not True:
             skipped("subfinder", "allow_passive_integrations=true requis dans le profil.")
@@ -222,7 +255,9 @@ def run_pipeline(
 
     archived_urls: list[str] = []
     if "gau" in enabled:
-        if not confirm_authorized:
+        if target_is_ip:
+            skipped("gau", "gau recherche des URL archivées pour un nom de domaine, pas une IP.")
+        elif not confirm_authorized:
             skipped("gau", "Ajoutez --confirm-authorized après validation du périmètre.")
         elif profile.get("allow_passive_integrations") is not True:
             skipped("gau", "allow_passive_integrations=true requis dans le profil.")
@@ -247,7 +282,9 @@ def run_pipeline(
 
     active_allowed = profile.get("mode") != "passive_only" and confirm_authorized
     if "dnsx" in enabled:
-        if not active_allowed or profile.get("dns_enabled") is not True:
+        if target_is_ip:
+            skipped("dnsx", "DNSx est réservé ici aux noms de domaine ; les IP sont ciblées par HTTPX.")
+        elif not active_allowed or profile.get("dns_enabled") is not True:
             skipped("dnsx", "Requiert mode non passif, dns_enabled=true et --confirm-authorized.")
         else:
             host_file = directory / "dns-input.txt"
@@ -267,23 +304,38 @@ def run_pipeline(
         if not active_allowed or profile.get("active_http_enabled") is not True:
             skipped("httpx", "Requiert mode non passif, active_http_enabled=true et --confirm-authorized.")
         else:
-            host_file = directory / "httpx-input.txt"
-            host_file.write_text("\n".join(f"https://{host}" for host in hosts[:int(profile.get("max_hosts", 20))]), encoding="utf-8")
-            args = [
-                "-l", str(host_file), "-ports", "https:443", "-json", "-silent", "-sc", "-title", "-td", "-server", "-ip", "-cname",
-                "-rl", "1", "-threads", "1", "-timeout", "5", "-retries", "0",
-            ]
-            result = _execute("httpx", args, directory, int(profile.get("httpx_timeout_seconds", 120)))
-            stdout = result.pop("stdout", "")
-            rows = _jsonl(stdout)
-            raw_urls = [row["url"] for row in rows if isinstance(row.get("url"), str)]
-            alive_urls = _scope_filter_urls(raw_urls, profile, int(profile.get("max_web_targets", 5)), require_https=bool(profile.get("https_only", True)))
-            allowed_urls = set(alive_urls)
-            scoped_rows = [row for row in rows if isinstance(row.get("url"), str) and row.get("url") in allowed_urls]
-            result["records"] = scoped_rows[:int(profile.get("max_results", 100))]
-            result["count"] = len(scoped_rows)
-            result["in_scope_urls"] = alive_urls
-            report["stages"]["httpx"] = result
+            from urllib.parse import urlsplit
+            parsed_seed = urlsplit(seed_url)
+            scheme = parsed_seed.scheme or "https"
+            web_inputs = []
+            for host in hosts[:int(profile.get("max_hosts", 20))]:
+                if not _network_host_allowed(host, profile):
+                    continue
+                if host == root:
+                    web_inputs.append(seed_url)
+                else:
+                    netloc_host = f"[{host}]" if ":" in host else host
+                    web_inputs.append(f"{scheme}://{netloc_host}/")
+            if not web_inputs:
+                skipped("httpx", "Aucune cible Web ne passe le contrôle IP publique ; mode laboratoire privé non activé.")
+            else:
+                host_file = directory / "httpx-input.txt"
+                host_file.write_text("\n".join(web_inputs), encoding="utf-8")
+                args = [
+                    "-l", str(host_file), "-json", "-silent", "-sc", "-title", "-td", "-server", "-ip", "-cname",
+                    "-rl", "1", "-threads", "1", "-timeout", "5", "-retries", "0",
+                ]
+                result = _execute("httpx", args, directory, int(profile.get("httpx_timeout_seconds", 120)))
+                stdout = result.pop("stdout", "")
+                rows = _jsonl(stdout)
+                raw_urls = [row["url"] for row in rows if isinstance(row.get("url"), str)]
+                alive_urls = _scope_filter_urls(raw_urls, profile, int(profile.get("max_web_targets", 5)), require_https=bool(profile.get("https_only", False)))
+                allowed_urls = set(alive_urls)
+                scoped_rows = [row for row in rows if isinstance(row.get("url"), str) and row.get("url") in allowed_urls]
+                result["records"] = scoped_rows[:int(profile.get("max_results", 100))]
+                result["count"] = len(scoped_rows)
+                result["in_scope_urls"] = alive_urls
+                report["stages"]["httpx"] = result
     else:
         skipped("httpx", "httpx absent de profile.enabled_tools")
 
