@@ -4,6 +4,7 @@ from recon_osint.core.scope import validate_target, ScopeError
 from recon_osint.modules.javascript import analyze_javascript
 from recon_osint.modules.headers import analyze_headers
 from recon_osint.core.config import load_config, get_profile
+from recon_osint.cli import _validate_js_base_url
 
 class CoreTests(unittest.TestCase):
     def test_scope_root_and_subdomain(self):
@@ -19,6 +20,23 @@ class CoreTests(unittest.TestCase):
     def test_scope_rejects_ip_addresses(self):
         with self.assertRaises(ScopeError):
             validate_target("127.0.0.1", {"root_domain": "127.0.0.1", "include_subdomains": False})
+
+    def test_javascript_keeps_relative_paths_without_explicit_base(self):
+        out = analyze_javascript('fetch("/api/items?page=2&sort=asc");')
+        self.assertIn("/api/items?page=2&sort=asc", out["endpoints"])
+        self.assertNotIn("https://example.com/api/items?page=2&sort=asc", out["endpoints"])
+
+    def test_javascript_resolves_paths_only_with_explicit_base(self):
+        out = analyze_javascript('fetch("/api/items?page=2&sort=asc");', "https://example.com/app.js")
+        self.assertIn("https://example.com/api/items?page=2&sort=asc", out["endpoints"])
+
+    def test_js_base_url_must_be_in_profile_scope(self):
+        profile = {"root_domain": "example.com", "include_subdomains": False, "https_only": True}
+        self.assertEqual(_validate_js_base_url("https://example.com/app.js", profile), "https://example.com/app.js")
+        with self.assertRaises(ScopeError):
+            _validate_js_base_url("https://other.example.net/app.js", profile)
+        with self.assertRaises(ScopeError):
+            _validate_js_base_url("http://example.com/app.js", profile)
 
     def test_javascript_extraction_and_secret_redaction(self):
         src = 'fetch("/api/items?page=2&sort=asc"); const api_key="EXAMPLE_NOT_A_REAL_SECRET_VALUE_12345";'
