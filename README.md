@@ -1,16 +1,22 @@
-# RECON OSINT V4
+# RECON OSINT V4.1
 
-Outil Python modulaire de reconnaissance OSINT encadrée et d'analyse locale. Python 3.10+ ; aucune dépendance externe à l'exécution.
+Plateforme Python qui orchestre des outils open source spécialisés, normalise leurs résultats et applique un contrôle de périmètre avant leur intégration au rapport. Python 3.10+ ; les modules Python du projet utilisent la bibliothèque standard. Les exécutables externes sont facultatifs et doivent être installés séparément.
 
-## Modules
+## Outils intégrés
 
-- **Certificate Transparency** : collecte passive via crt.sh, uniquement si `crtsh` figure dans `allowed_sources`.
-- **DNS** : résolution A/AAAA via le résolveur du système, uniquement si `dns_enabled=true` et avec `--confirm-authorized`.
-- **HTTP headers** : une seule requête HEAD à `/`, sans crawl, uniquement si `active_http_enabled=true` et avec `--confirm-authorized`. Les redirections doivent rester en HTTPS et dans le périmètre.
-- **JavaScript** : analyse statique hors ligne de fichiers locaux ; extrait chemins/endpoints et noms de paramètres. Signale des motifs ressemblant à des secrets sans jamais reproduire leur valeur.
-- **Rapports** : JSON et Markdown.
+| Outil | Fonction | Type |
+|---|---|---|
+| [Subfinder](https://github.com/projectdiscovery/subfinder) | Énumération passive de sous-domaines | Passif / sources tierces |
+| [gau](https://github.com/lc/gau) | URL archivées (Wayback, Common Crawl, OTX, URLScan) | Passif / sources tierces |
+| [dnsx](https://github.com/projectdiscovery/dnsx) | Résolution DNS A, AAAA et CNAME | Requête DNS |
+| [httpx](https://github.com/projectdiscovery/httpx) | Statut HTTP, titre, technologies, serveur et IP | Requête HTTP |
+| [Katana](https://github.com/projectdiscovery/katana) | Exploration limitée et extraction JavaScript | Crawl HTTP |
+| [Semgrep](https://github.com/semgrep/semgrep) | Analyse statique du code local | Local |
+| [Gitleaks](https://github.com/gitleaks/gitleaks) | Recherche de secrets dans un dépôt/dossier local | Local |
 
-## Installation Windows PowerShell
+RECON OSINT ne réécrit pas ces outils : il vérifie leur présence dans `PATH`, lance des arguments prédéfinis sans shell, applique des délais, filtre les hôtes/URL hors périmètre et rassemble les sorties JSON/texte.
+
+## Installation Python (Windows PowerShell)
 
 ```powershell
 py -3 -m venv .venv
@@ -18,36 +24,69 @@ py -3 -m venv .venv
 python -m pip install -e .
 ```
 
-## Exemples
+Installe uniquement les exécutables nécessaires depuis les pages Releases officielles liées ci-dessus. Les outils ProjectDiscovery sont développés en Go et proposent des binaires Windows ; Gitleaks fournit également des binaires Windows. Semgrep s'installe séparément selon les prérequis de sa version et de ton environnement.
 
-Mode Meesho verrouillé (aucune collecte réseau avec la configuration initiale) :
-
-```powershell
-python main.py --profile meesho_root --config config.json --modules all --out reports
-```
-
-Analyse JavaScript locale : sans `--js-base-url`, les chemins relatifs restent tels quels. Une URL de base explicite n'est acceptée que si son hôte appartient au périmètre du profil.
+Vérifier les exécutables installés (ne lance aucun scan) :
 
 ```powershell
-python main.py --profile meesho_root --config config.json --modules js --js fixtures/js/sample.js --out reports
+python main.py --profile lab --check-tools
 ```
 
-Pour normaliser les chemins relatifs d'un script local réellement issu d'un hôte du périmètre, indique son URL de base exacte :
+## Lancer l'orchestrateur
+
+`--run-integrations` demande l'orchestration. Chaque outil doit également figurer dans `enabled_tools` du profil. Les outils externes de reconnaissance nécessitent `--confirm-authorized`. Par défaut, tous les outils sont désactivés.
+
+Exemple de profil de laboratoire, uniquement pour un domaine détenu ou couvert par une autorisation écrite :
+
+```json
+{
+  "root_domain": "example.com",
+  "include_subdomains": true,
+  "mode": "authorized_lab",
+  "integrations_disabled": false,
+  "allow_passive_integrations": true,
+  "enabled_tools": ["subfinder", "gau", "dnsx", "httpx"],
+  "dns_enabled": true,
+  "active_http_enabled": true,
+  "active_crawl_enabled": false,
+  "max_results": 100,
+  "max_hosts": 10,
+  "max_urls": 200,
+  "max_web_targets": 3
+}
+```
+
+Après configuration du domaine et validation de l'autorisation :
 
 ```powershell
-python main.py --profile lab --config config.json --modules js --js .\app.js --js-base-url https://example.com/assets/app.js --out reports
+python main.py --profile lab --config config.json --modules js --run-integrations --confirm-authorized --out reports
 ```
 
-Profil de laboratoire : modifier `profiles.lab.root_domain` dans `config.json` pour y mettre le domaine exact détenu ou expressément autorisé. DNS, HTTP et CT sont désactivés par défaut dans le profil modèle ; activer seulement les modules couverts par l'autorisation.
+Katana reste désactivé tant que `active_crawl_enabled` n'est pas explicitement activé. Active-le uniquement avec une autorisation couvrant le crawl, un débit convenu et un périmètre de noms d'hôte précis.
+
+### Analyse locale du code
+
+Semgrep nécessite un fichier ou un dossier de règles local. Gitleaks utilise ses règles intégrées :
+
+```powershell
+python main.py --profile lab --run-integrations --source-dir .\mon-projet --semgrep-config .\rules\ --out reports
+```
+
+Ajoute `semgrep` et/ou `gitleaks` à `enabled_tools`. Ces modules analysent uniquement le chemin local fourni et n'effectuent pas de reconnaissance réseau.
+
+## Verrouillage du profil Meesho
+
+Le profil `meesho_root` de ce dépôt utilise `integrations_disabled: true`, `enabled_tools: []` et `allow_passive_integrations: false`. Le kill switch du code bloque les outils externes de ce profil même si `enabled_tools` est modifié accidentellement. Il n'effectue aucun scan Meesho. Les règles du programme de bug bounty restent la référence : le domaine racine ne donne pas automatiquement l'autorisation de tester des sous-domaines ou d'utiliser des scanners automatisés.
 
 ## Sécurité et limites
 
-- Le programme ne réalise ni exploitation, ni fuzzing, ni brute force, ni test de charge, ni crawl de site.
-- Le profil `meesho_root` reste passif, racine uniquement et avec `allowed_sources: []`. Ne pas l'élargir sans autorisation écrite et précise du programme de bug bounty.
-- `lab` est un modèle, pas une autorisation. Remplacez le domaine exemple et activez explicitement les modules autorisés.
-- Le module HTTP envoie une seule requête HEAD sur `/`, pas un audit exhaustif. Il bloque les redirections hors périmètre, vers un autre schéma/port, et les résolutions DNS non publiques. Les observations de headers sont des pistes, pas des vulnérabilités confirmées.
-- Le module JavaScript analyse les fichiers déjà présents localement ; il ne télécharge aucun script du domaine.
-- CT reflète des certificats publics, qui peuvent être historiques, et ne prouve ni disponibilité ni propriété opérationnelle d'un hôte.
+- Aucun module d'exploitation, brute force, fuzzing, test de charge ou DoS n'est orchestré.
+- Subfinder et gau interrogent des services tiers ; ils restent désactivés tant que le profil ne les autorise pas explicitement.
+- dnsx, httpx et Katana ne s'exécutent que dans un profil non passif, avec les interrupteurs propres au module et `--confirm-authorized`.
+- Les hôtes et URL renvoyés par les outils sont revalidés contre le domaine du profil avant réutilisation. Les résultats HTTP et Katana hors périmètre sont exclus des données structurées du rapport.
+- Katana est limité à la profondeur 2, un worker, un input à la fois, 1 requête/seconde, 20 requêtes/minute et 30 secondes. Ces plafonds ne garantissent pas l'absence d'impact : respecte les règles de l'actif.
+- Les observations sont des pistes et non des vulnérabilités confirmées ; les vérifier manuellement avant tout rapport.
+- Semgrep et Gitleaks analysent uniquement des fichiers/dossiers locaux fournis par l'utilisateur.
 
 ## Tests hors ligne
 
