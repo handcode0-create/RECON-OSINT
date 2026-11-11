@@ -1,5 +1,5 @@
 {
-  "version": "4.1.0",
+  "version": "4.2.0",
   "profiles": {
     "meesho_root": {
       "description": "Profil Meesho verrouillé en passif, limité au domaine racine. Les sources restent désactivées par défaut.",
@@ -25,27 +25,37 @@
       "gitleaks_timeout_seconds": 120
     },
     "lab": {
-      "description": "Profil modèle pour un domaine détenu ou expressément autorisé. Les modules réseau sont désactivés par défaut.",
-      "root_domain": "example.com",
-      "include_subdomains": true,
+      "description": "Profil universel : domaine, URL ou IP saisi à chaque exécution. Les outils compatibles sont activés ; sous-domaines et cibles IP privées nécessitent une option explicite au lancement.",
+      "root_domain": "",
+      "include_subdomains": false,
       "mode": "authorized_lab",
       "allowed_sources": [],
-      "dns_enabled": false,
-      "active_http_enabled": false,
-      "https_only": true,
+      "dns_enabled": true,
+      "active_http_enabled": true,
+      "https_only": false,
       "max_results": 300,
       "max_hosts": 20,
       "timeout_seconds": 8,
       "integrations_disabled": false,
-      "allow_passive_integrations": false,
-      "enabled_tools": [],
-      "active_crawl_enabled": false,
+      "allow_passive_integrations": true,
+      "enabled_tools": [
+        "subfinder",
+        "gau",
+        "dnsx",
+        "httpx",
+        "katana",
+        "semgrep",
+        "gitleaks"
+      ],
+      "active_crawl_enabled": true,
       "max_urls": 300,
       "max_web_targets": 3,
       "httpx_timeout_seconds": 60,
       "katana_timeout_seconds": 60,
       "semgrep_timeout_seconds": 180,
-      "gitleaks_timeout_seconds": 180
+      "gitleaks_timeout_seconds": 180,
+      "allow_private_targets": false,
+      "target_port": null
     }
   }
 }
