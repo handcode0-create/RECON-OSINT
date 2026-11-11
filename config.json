@@ -15,13 +15,13 @@
       "timeout_seconds": 8
     },
     "lab": {
-      "description": "Profil modèle pour un domaine détenu ou expressément autorisé. Remplacer example.com et activer les modules requis après validation du périmètre.",
+      "description": "Profil modèle pour un domaine détenu ou expressément autorisé. Les modules réseau sont désactivés par défaut.",
       "root_domain": "example.com",
       "include_subdomains": true,
       "mode": "authorized_lab",
-      "allowed_sources": ["crtsh"],
-      "dns_enabled": true,
-      "active_http_enabled": true,
+      "allowed_sources": [],
+      "dns_enabled": false,
+      "active_http_enabled": false,
       "https_only": true,
       "max_results": 300,
       "max_hosts": 20,
