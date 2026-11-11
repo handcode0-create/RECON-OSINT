@@ -91,6 +91,18 @@ class IntegrationPolicyTests(unittest.TestCase):
             result = check_tools()
         self.assertEqual(result["httpx"]["status"], "installed")
 
+    def test_projectdiscovery_katana_v1_signature_is_accepted(self):
+        from subprocess import CompletedProcess
+        def fake_which(name):
+            return r"C:\\tools\\katana.exe" if name == "katana" else None
+        expected_cli = CompletedProcess(args=["katana", "-h"], returncode=0,
+            stdout="Katana is a fast crawler focused on execution in automation pipelines -j, -jsonl -fs, -field-scope",
+            stderr="")
+        with patch("recon_osint.integrations.orchestrator.shutil.which", side_effect=fake_which), \\
+             patch("recon_osint.integrations.orchestrator.subprocess.run", return_value=expected_cli):
+            result = check_tools()
+        self.assertEqual(result["katana"]["status"], "installed")
+
     def test_https_only_scope_filter_rejects_http_results(self):
         profile = {"root_domain": "example.com", "include_subdomains": True, "https_only": True}
         urls = ["http://example.com/plain", "https://example.com/secure"]
