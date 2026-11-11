@@ -1,4 +1,4 @@
-# RECON OSINT V4.1
+# RECON OSINT V4.2
 
 Plateforme Python qui orchestre des outils open source spécialisés, normalise leurs résultats et applique un contrôle de périmètre avant leur intégration au rapport. Python 3.10+ ; les modules Python du projet utilisent la bibliothèque standard. Les exécutables externes sont facultatifs et doivent être installés séparément.
 
@@ -73,6 +73,48 @@ python main.py --profile lab --run-integrations --source-dir .\mon-projet --semg
 ```
 
 Ajoute `semgrep` et/ou `gitleaks` à `enabled_tools`. Ces modules analysent uniquement le chemin local fourni et n'effectuent pas de reconnaissance réseau.
+
+## Cible universelle à chaque lancement
+
+Le profil `lab` est un modèle universel : il ne fixe aucun domaine. À chaque exécution, RECON-OSINT demande une cible (domaine, URL HTTP(S), IPv4 ou IPv6), ou accepte `--target`. La cible saisie devient la racine exacte du périmètre pour cette exécution ; elle n'est pas enregistrée comme cible permanente.
+
+Les sept adaptateurs sont activés dans le profil laboratoire : Subfinder, gau, DNSx, HTTPX, Katana, Semgrep et Gitleaks. Seuls les adaptateurs compatibles avec la cible et les données fournies sont exécutés. Pour une IP, Subfinder, gau et DNSx sont ignorés ; HTTPX et Katana peuvent examiner le service Web. Semgrep et Gitleaks nécessitent un dossier de code local. Les sous-domaines sont exclus par défaut ; ajoutez `--include-subdomains` uniquement lorsque l'autorisation les couvre.
+
+Lancement interactif (la cible puis une confirmation d'autorisation seront demandées) :
+
+```powershell
+python main.py --profile lab --run-integrations --out reports
+```
+
+Pour saisir directement une cible :
+
+```powershell
+python main.py --profile lab --target https://example.org/app --run-integrations --out reports
+```
+
+Pour inclure les sous-domaines expressément autorisés :
+
+```powershell
+python main.py --profile lab --include-subdomains --run-integrations --out reports
+```
+
+Pour une IP privée d'un laboratoire que vous êtes autorisé à tester (HTB, VM ou réseau de test), ajoutez l'option explicite :
+
+```powershell
+python main.py --profile lab --target http://192.168.56.10:8080 --allow-private-target --run-integrations --out reports
+```
+
+Sans `--allow-private-target`, les connexions HTTP vers des IP non publiques sont bloquées. Les URL contenant des identifiants sont refusées ; les paramètres de requête et fragments sont supprimés des URL utilisées comme cible. Les intégrations réseau nécessitent une confirmation à chaque exécution, sauf si `--confirm-authorized` est fourni.
+
+### Analyse locale du code
+
+Semgrep nécessite un fichier ou un dossier de règles local. Gitleaks utilise ses règles intégrées :
+
+```powershell
+python main.py --profile lab --run-integrations --source-dir .\mon-projet --semgrep-config .\rules\ --out reports
+```
+
+Les analyses Semgrep et Gitleaks portent uniquement sur le chemin local fourni. Elles ne scannent pas le site Web distant.
 
 ## Verrouillage du profil Meesho
 
