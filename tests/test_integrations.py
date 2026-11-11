@@ -135,7 +135,7 @@ class IntegrationPolicyTests(unittest.TestCase):
         def fake_execute(tool, args, out_dir, timeout):
             calls.append(tool)
             if tool == "httpx":
-                return {"tool": tool, "status": "ok", "stdout": '{"url":"https://192.0.2.10/"}\\n'}
+                return {"tool": tool, "status": "ok", "stdout": '{"url":"https://192.0.2.10/"}\n'}
             return {"tool": tool, "status": "ok", "stdout": ""}
         with tempfile.TemporaryDirectory() as tmp:
             with patch("recon_osint.integrations.orchestrator.check_tools", return_value={}), \\
