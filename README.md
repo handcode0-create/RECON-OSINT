@@ -32,10 +32,10 @@ Analyse JavaScript locale (hors ligne) :
 python main.py --profile meesho_root --config config.json --modules js --js fixtures/js/sample.js --out reports
 ```
 
-Profil de laboratoire : remplacer `example.com` par un domaine détenu ou expressément autorisé. DNS, HTTP et CT sont désactivés par défaut dans le profil modèle ; activer seulement les modules qui sont couverts par l'autorisation.
+Profil de laboratoire : modifier `profiles.lab.root_domain` dans `config.json` pour y mettre le domaine exact détenu ou expressément autorisé. DNS, HTTP et CT sont désactivés par défaut dans le profil modèle ; activer seulement les modules couverts par l'autorisation.
 
 ```powershell
-python main.py --profile lab --config config.json --domain votredomaine.test --modules dns,headers --confirm-authorized --out reports
+python main.py --profile lab --config config.json --modules dns,headers --confirm-authorized --out reports
 ```
 
 ## Sécurité et limites
