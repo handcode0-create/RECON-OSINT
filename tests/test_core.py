@@ -68,6 +68,11 @@ class CoreTests(unittest.TestCase):
         cfg = load_config(Path(__file__).parents[1] / "config.json")
         self.assertEqual(get_profile(cfg, "meesho_root")["allowed_sources"], [])
         self.assertFalse(get_profile(cfg, "meesho_root")["active_http_enabled"])
-        self.assertFalse(get_profile(cfg, "lab")["active_http_enabled"])
+        lab = get_profile(cfg, "lab")
+        self.assertTrue(lab["active_http_enabled"])
+        self.assertTrue(lab["dns_enabled"])
+        self.assertTrue(lab["active_crawl_enabled"])
+        self.assertEqual(set(lab["enabled_tools"]), {"subfinder", "gau", "dnsx", "httpx", "katana", "semgrep", "gitleaks"})
+        self.assertEqual(lab["root_domain"], "")
 
 if __name__ == "__main__": unittest.main()
