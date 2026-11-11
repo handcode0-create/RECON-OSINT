@@ -1,35 +1,28 @@
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
-from recon_osint.integrations.orchestrator import run_pipeline
+from recon_osint.integrations.orchestrator import run_pipeline, _scope_filter_urls
 
 class IntegrationPolicyTests(unittest.TestCase):
-    def test_meesho_profile_does_not_run_external_tools_by_default(self):
+    def test_meesho_profile_kill_switch_blocks_every_external_tool(self):
         profile = {
-            "root_domain": "meesho.com",
-            "include_subdomains": False,
-            "mode": "passive_only",
-            "enabled_tools": [],
-            "max_results": 100,
-            "max_hosts": 1,
+            "root_domain": "meesho.com", "include_subdomains": False,
+            "mode": "passive_only", "integrations_disabled": True,
+            "enabled_tools": ["subfinder", "gau", "dnsx", "httpx", "katana"],
+            "max_results": 100, "max_hosts": 1,
         }
         with tempfile.TemporaryDirectory() as tmp:
             with patch("recon_osint.integrations.orchestrator._execute") as execute:
                 result = run_pipeline(profile, "meesho.com", tmp, confirm_authorized=True)
                 execute.assert_not_called()
-        self.assertEqual(result["summary"]["hosts_in_scope"], 1)
-        self.assertEqual(result["stages"]["subfinder"]["status"], "skipped")
-        self.assertEqual(result["stages"]["httpx"]["status"], "skipped")
+        self.assertTrue(all(x["status"] == "skipped" for x in result["stages"].values()))
+        self.assertTrue(result["policy"]["meesho_profile_integrations_disabled"])
 
-    def test_httpx_requires_explicit_authorization_and_profile_toggle(self):
+    def test_active_tools_require_profile_toggle(self):
         profile = {
-            "root_domain": "example.com",
-            "include_subdomains": True,
-            "mode": "authorized_lab",
-            "enabled_tools": ["httpx"],
-            "active_http_enabled": False,
-            "max_hosts": 10,
+            "root_domain": "example.com", "include_subdomains": True,
+            "mode": "authorized_lab", "integrations_disabled": False,
+            "enabled_tools": ["httpx"], "active_http_enabled": False, "max_hosts": 10,
         }
         with tempfile.TemporaryDirectory() as tmp:
             with patch("recon_osint.integrations.orchestrator._execute") as execute:
@@ -37,14 +30,11 @@ class IntegrationPolicyTests(unittest.TestCase):
                 execute.assert_not_called()
         self.assertEqual(result["stages"]["httpx"]["status"], "skipped")
 
-    def test_active_tool_requires_confirmation(self):
+    def test_external_tools_require_cli_confirmation(self):
         profile = {
-            "root_domain": "example.com",
-            "include_subdomains": True,
-            "mode": "authorized_lab",
-            "enabled_tools": ["dnsx"],
-            "dns_enabled": True,
-            "max_hosts": 10,
+            "root_domain": "example.com", "include_subdomains": True,
+            "mode": "authorized_lab", "integrations_disabled": False,
+            "enabled_tools": ["dnsx"], "dns_enabled": True, "max_hosts": 10,
         }
         with tempfile.TemporaryDirectory() as tmp:
             with patch("recon_osint.integrations.orchestrator._execute") as execute:
@@ -52,21 +42,41 @@ class IntegrationPolicyTests(unittest.TestCase):
                 execute.assert_not_called()
         self.assertEqual(result["stages"]["dnsx"]["status"], "skipped")
 
-    def test_subfinder_output_is_scope_filtered(self):
+    def test_passive_sources_require_profile_opt_in(self):
         profile = {
-            "root_domain": "example.com",
-            "include_subdomains": True,
-            "mode": "authorized_lab",
-            "enabled_tools": ["subfinder"],
-            "max_results": 10,
-            "max_hosts": 10,
+            "root_domain": "example.com", "include_subdomains": True,
+            "mode": "authorized_lab", "integrations_disabled": False,
+            "allow_passive_integrations": False, "enabled_tools": ["subfinder"],
+            "max_results": 10, "max_hosts": 10,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("recon_osint.integrations.orchestrator._execute") as execute:
+                result = run_pipeline(profile, "example.com", tmp, confirm_authorized=True)
+                execute.assert_not_called()
+        self.assertEqual(result["stages"]["subfinder"]["status"], "skipped")
+
+    def test_subfinder_output_is_filtered_to_configured_scope(self):
+        profile = {
+            "root_domain": "example.com", "include_subdomains": True,
+            "mode": "authorized_lab", "integrations_disabled": False,
+            "allow_passive_integrations": True, "enabled_tools": ["subfinder"],
+            "max_results": 10, "max_hosts": 10,
         }
         with tempfile.TemporaryDirectory() as tmp:
             def fake_execute(tool, args, out_dir, timeout):
                 return {"tool": tool, "status": "ok", "stdout": "api.example.com\nevil.example.net\nwww.example.com\n"}
             with patch("recon_osint.integrations.orchestrator._execute", side_effect=fake_execute):
-                result = run_pipeline(profile, "example.com", tmp)
+                result = run_pipeline(profile, "example.com", tmp, confirm_authorized=True)
         self.assertEqual(result["scope_filtered"]["hosts"], ["api.example.com", "example.com", "www.example.com"])
+
+    def test_url_filter_rejects_out_of_scope_and_invalid_urls(self):
+        profile = {"root_domain": "example.com", "include_subdomains": True}
+        urls = [
+            "https://api.example.com/ok", "https://evil.example.net/no",
+            "javascript:alert(1)", "http://user:pass@example.com/creds",
+            "https://example.com:8443/nonstandard-port",
+        ]
+        self.assertEqual(_scope_filter_urls(urls, profile, 20), ["https://api.example.com/ok"])
 
 if __name__ == "__main__":
     unittest.main()
