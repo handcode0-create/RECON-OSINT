@@ -1,0 +1,31 @@
+{
+  "version": "4.0.0",
+  "profiles": {
+    "meesho_root": {
+      "description": "Profil Meesho verrouillé en passif, limité au domaine racine. Les sources restent désactivées par défaut.",
+      "root_domain": "meesho.com",
+      "include_subdomains": false,
+      "mode": "passive_only",
+      "allowed_sources": [],
+      "dns_enabled": false,
+      "active_http_enabled": false,
+      "https_only": true,
+      "max_results": 100,
+      "max_hosts": 1,
+      "timeout_seconds": 8
+    },
+    "lab": {
+      "description": "Profil modèle pour un domaine détenu ou expressément autorisé. Remplacer example.com et activer les modules requis après validation du périmètre.",
+      "root_domain": "example.com",
+      "include_subdomains": true,
+      "mode": "authorized_lab",
+      "allowed_sources": ["crtsh"],
+      "dns_enabled": true,
+      "active_http_enabled": true,
+      "https_only": true,
+      "max_results": 300,
+      "max_hosts": 20,
+      "timeout_seconds": 8
+    }
+  }
+}
