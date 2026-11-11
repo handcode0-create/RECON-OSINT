@@ -32,48 +32,6 @@ Vérifier les exécutables installés (ne lance aucun scan) :
 python main.py --profile lab --check-tools
 ```
 
-## Lancer l'orchestrateur
-
-`--run-integrations` demande l'orchestration. Chaque outil doit également figurer dans `enabled_tools` du profil. Les outils externes de reconnaissance nécessitent `--confirm-authorized`. Par défaut, tous les outils sont désactivés.
-
-Exemple de profil de laboratoire, uniquement pour un domaine détenu ou couvert par une autorisation écrite :
-
-```json
-{
-  "root_domain": "example.com",
-  "include_subdomains": true,
-  "mode": "authorized_lab",
-  "integrations_disabled": false,
-  "allow_passive_integrations": true,
-  "enabled_tools": ["subfinder", "gau", "dnsx", "httpx"],
-  "dns_enabled": true,
-  "active_http_enabled": true,
-  "active_crawl_enabled": false,
-  "max_results": 100,
-  "max_hosts": 10,
-  "max_urls": 200,
-  "max_web_targets": 3
-}
-```
-
-Après configuration du domaine et validation de l'autorisation :
-
-```powershell
-python main.py --profile lab --config config.json --modules js --run-integrations --confirm-authorized --out reports
-```
-
-Katana reste désactivé tant que `active_crawl_enabled` n'est pas explicitement activé. Active-le uniquement avec une autorisation couvrant le crawl, un débit convenu et un périmètre de noms d'hôte précis.
-
-### Analyse locale du code
-
-Semgrep nécessite un fichier ou un dossier de règles local. Gitleaks utilise ses règles intégrées :
-
-```powershell
-python main.py --profile lab --run-integrations --source-dir .\mon-projet --semgrep-config .\rules\ --out reports
-```
-
-Ajoute `semgrep` et/ou `gitleaks` à `enabled_tools`. Ces modules analysent uniquement le chemin local fourni et n'effectuent pas de reconnaissance réseau.
-
 ## Cible universelle à chaque lancement
 
 Le profil `lab` est un modèle universel : il ne fixe aucun domaine. À chaque exécution, RECON-OSINT demande une cible (domaine, URL HTTP(S), IPv4 ou IPv6), ou accepte `--target`. La cible saisie devient la racine exacte du périmètre pour cette exécution ; elle n'est pas enregistrée comme cible permanente.
@@ -123,9 +81,9 @@ Le profil `meesho_root` de ce dépôt utilise `integrations_disabled: true`, `en
 ## Sécurité et limites
 
 - Aucun module d'exploitation, brute force, fuzzing, test de charge ou DoS n'est orchestré.
-- Subfinder et gau interrogent des services tiers ; ils restent désactivés tant que le profil ne les autorise pas explicitement.
-- dnsx, httpx et Katana ne s'exécutent que dans un profil non passif, avec les interrupteurs propres au module et `--confirm-authorized`. Pour httpx, les entrées et résultats sont limités à HTTPS/443 lorsque `https_only=true`.
-- Les hôtes et URL renvoyés par les outils sont revalidés contre le domaine du profil avant réutilisation. Les résultats HTTP et Katana hors périmètre sont exclus des données structurées du rapport.
+- Subfinder et gau interrogent des services tiers ; leur utilisation est activée dans le profil lab mais reste soumise à la confirmation d'autorisation de chaque lancement.
+- DNSx, HTTPX et Katana ne s'exécutent qu'après confirmation d'autorisation. Les URL sont limitées à l'hôte et au port saisis ; les IP privées nécessitent `--allow-private-target`.
+- Les hôtes et URL renvoyés par les outils sont revalidés contre la cible de l'exécution avant réutilisation. Les sous-domaines ne sont inclus qu'avec `--include-subdomains`.
 - Katana est limité à la profondeur 2, un worker, un input à la fois, 1 requête/seconde, 20 requêtes/minute et 30 secondes. Ces plafonds ne garantissent pas l'absence d'impact : respecte les règles de l'actif.
 - Les observations sont des pistes et non des vulnérabilités confirmées ; les vérifier manuellement avant tout rapport.
 - Semgrep et Gitleaks analysent uniquement des fichiers/dossiers locaux fournis par l'utilisateur.
