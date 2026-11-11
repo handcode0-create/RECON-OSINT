@@ -247,7 +247,7 @@ def run_pipeline(
             names = _scope_filter_hosts(_lines(stdout, max_results), profile, max_hosts)
             result["count"] = len(names)
             result["hosts_file"] = str(directory / "subfinder-hosts.txt")
-            (directory / "subfinder-hosts.txt").write_text("\\n".join(names), encoding="utf-8")
+            (directory / "subfinder-hosts.txt").write_text("\n".join(names), encoding="utf-8")
             report["stages"]["subfinder"] = result
             hosts = sorted(set(hosts + names))
     else:
@@ -275,7 +275,7 @@ def run_pipeline(
                 archived_urls = _scope_filter_urls(_lines(stdout, max_urls), profile, max_urls)
                 result["count"] = len(archived_urls)
                 result["urls_file"] = str(directory / "gau-urls.txt")
-                (directory / "gau-urls.txt").write_text("\\n".join(archived_urls), encoding="utf-8")
+                (directory / "gau-urls.txt").write_text("\n".join(archived_urls), encoding="utf-8")
                 report["stages"]["gau"] = result
     else:
         skipped("gau", "gau absent de profile.enabled_tools")
