@@ -21,14 +21,15 @@ def _validate_js_base_url(value: str, profile: dict) -> str:
         raise ScopeError("URL de base JS invalide ou contenant des identifiants.")
     validate_target(parsed.hostname, profile)
     allowed_port = int(profile.get("target_port", 443))
-    if parsed.port not in (None, allowed_port):
+    effective_port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    if effective_port != allowed_port:
         raise ScopeError("L'URL de base JS doit rester sur le port de la cible fournie.")
     return value
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="recon-osint", description="RECON OSINT V4.1 — orchestration open source encadrée et analyse locale")
+    p = argparse.ArgumentParser(prog="recon-osint", description="RECON OSINT V4.2 — scanner universel à cible saisie à chaque exécution")
     p.add_argument("--config", default="config.json")
-    p.add_argument("--profile", required=True)
+    p.add_argument("--profile", default="lab", help="Profil d’exécution (lab par défaut ; meesho_root reste verrouillé)")
     p.add_argument("--target", "--domain", dest="target", help="Domaine, URL HTTP(S), IPv4 ou IPv6. Demandé interactivement si absent.")
     p.add_argument("--include-subdomains", action="store_true", help="Inclut les sous-domaines du domaine saisi dans ce lancement.")
     p.add_argument("--allow-private-target", action="store_true", help="Autorise explicitement une IP privée/de laboratoire pour ce lancement.")
