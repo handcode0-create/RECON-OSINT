@@ -167,7 +167,10 @@ def _scope_filter_urls(values: list[str], profile: dict, limit: int, *, require_
         except ValueError:
             continue
         allowed_port = profile.get("target_port")
-        if allowed_port is not None and actual_port != int(allowed_port):
+        if allowed_port is None:
+            if actual_port not in (80, 443):
+                continue
+        elif actual_port != int(allowed_port):
             continue
         try:
             validate_target(host, profile)
