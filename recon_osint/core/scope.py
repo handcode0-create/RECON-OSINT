@@ -20,9 +20,10 @@ def normalize_host(value: str) -> str:
         raise ScopeError(f"Nom d'hôte invalide: {value!r}")
     try:
         ipaddress.ip_address(host)
-        raise ScopeError("Les adresses IP ne sont pas acceptées comme domaine racine.")
     except ValueError:
         pass
+    else:
+        raise ScopeError("Les adresses IP ne sont pas acceptées comme domaine racine.")
     return host.encode("idna").decode("ascii")
 
 def validate_target(target: str, profile: dict) -> str:
