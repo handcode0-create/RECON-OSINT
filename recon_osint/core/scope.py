@@ -9,7 +9,7 @@ class ScopeError(ValueError):
     pass
 
 
-_HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*\\.?$")
+_HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*\.?$")
 
 
 def is_ip_address(value: str) -> bool:
@@ -21,12 +21,11 @@ def is_ip_address(value: str) -> bool:
 
 
 def normalize_host(value: str) -> str:
-    """Normalize a hostname or IP literal; URL inputs are accepted as well."""
+    """Normalize a hostname or IP literal. URL and host:port inputs are accepted."""
     raw = str(value).strip()
     if not raw:
         raise ScopeError("Cible vide.")
 
-    # urlparse needs brackets around a bare IPv6 literal.
     candidate = raw
     if "://" not in candidate and candidate.count(":") > 1 and not candidate.startswith("["):
         candidate = f"[{candidate}]"
@@ -35,13 +34,11 @@ def normalize_host(value: str) -> str:
         raise ScopeError("Les URL avec identifiants intégrés sont refusées.")
     try:
         host = (parsed.hostname or "").rstrip(".").lower()
-        port = parsed.port
+        parsed.port  # Validate that a supplied port is numeric and in range.
     except ValueError as exc:
         raise ScopeError("Cible ou port invalide.") from exc
     if not host:
         raise ScopeError(f"Nom d'hôte invalide: {value!r}")
-    if port not in (None, 80, 443):
-        raise ScopeError("Seuls les ports HTTP/HTTPS standards (80 et 443) sont acceptés.")
 
     try:
         return ipaddress.ip_address(host).compressed.lower()
@@ -54,8 +51,8 @@ def normalize_host(value: str) -> str:
             raise ScopeError(f"Nom d'hôte invalide: {value!r}") from exc
 
 
-def parse_target_input(value: str, *, https_only: bool = True) -> tuple[str, str]:
-    """Return (normalized host/IP, safe seed URL). Query and fragment are omitted."""
+def parse_target_input(value: str, *, https_only: bool = False) -> tuple[str, str, int]:
+    """Return normalized host/IP, a sanitized seed URL, and its single explicit port."""
     raw = str(value).strip()
     if not raw:
         raise ScopeError("Cible vide.")
@@ -77,24 +74,28 @@ def parse_target_input(value: str, *, https_only: bool = True) -> tuple[str, str
         raw_host = parsed.hostname or ""
     except ValueError as exc:
         raise ScopeError("Cible ou port invalide.") from exc
-    if port not in (None, 80, 443):
-        raise ScopeError("Seuls les ports HTTP/HTTPS standards (80 et 443) sont acceptés.")
+    if not raw_host:
+        raise ScopeError("URL ou adresse IP invalide.")
 
     host = normalize_host(raw_host)
+    effective_port = port or (443 if scheme == "https" else 80)
+    if not 1 <= effective_port <= 65535:
+        raise ScopeError("Port cible invalide.")
     netloc_host = f"[{host}]" if ":" in host else host
     netloc = f"{netloc_host}:{port}" if port else netloc_host
     path = parsed.path or "/"
-    # Do not carry query strings/fragments into scan inputs or reports.
+    # Query strings and fragments are deliberately removed from scan inputs/reports.
     seed_url = urlunparse((scheme, netloc, path, "", "", ""))
-    return host, seed_url
+    return host, seed_url, effective_port
 
 
 def validate_target(target: str, profile: dict) -> str:
+    """Keep a run to one exact host/IP unless subdomain scope is explicitly enabled."""
     root = normalize_host(str(profile.get("root_domain", "")))
     host = normalize_host(str(target))
-
     root_is_ip = is_ip_address(root)
     host_is_ip = is_ip_address(host)
+
     if root_is_ip or host_is_ip:
         if root_is_ip and host_is_ip and host == root:
             return host
