@@ -20,8 +20,9 @@ def _validate_js_base_url(value: str, profile: dict) -> str:
     if parsed.username or parsed.password or not parsed.hostname:
         raise ScopeError("URL de base JS invalide ou contenant des identifiants.")
     validate_target(parsed.hostname, profile)
-    if parsed.port not in (None, 443):
-        raise ScopeError("L'URL de base JS doit utiliser le port HTTPS standard.")
+    allowed_port = int(profile.get("target_port", 443))
+    if parsed.port not in (None, allowed_port):
+        raise ScopeError("L'URL de base JS doit rester sur le port de la cible fournie.")
     return value
 
 def build_parser():
