@@ -52,9 +52,9 @@ def run(args=None):
         local = []
         for filename in ns.js:
             path = Path(filename)
-            try: text = path.read_text(encoding="utf-8", errors="replace")
+            try: source = path.read_text(encoding="utf-8", errors="replace")
             except OSError as exc: local.append({"file": filename, "error": type(exc).__name__}); continue
-            local.append({"file": filename, "analysis": analyze_javascript(text, f"https://{root}/")})
+            local.append({"file": filename, "analysis": analyze_javascript(source, f"https://{root}/")})
         results["javascript"] = local
     summary = {
         "sous-domaines CT": len(results.get("subdomains", {}).get("subdomains", [])) if isinstance(results.get("subdomains"), dict) else 0,
@@ -62,7 +62,7 @@ def run(args=None):
         "indicateurs JavaScript": sum(x.get("analysis", {}).get("counts", {}).get("secret_indicators", 0) for x in results.get("javascript", [])),
     }
     report = {"version": "4.0.0", "profile": ns.profile, "root_domain": root, "mode": profile.get("mode", "unknown"), "modules_requested": sorted(modules), "summary": summary, "results": results,
-              "safety": {"no_exploitation": True, "no_fuzzing": True, "javascript_analysis": "local_only", "http_headers": "single root GET only when explicitly enabled and confirmed"}}
+              "safety": {"no_exploitation": True, "no_fuzzing": True, "javascript_analysis": "local_only", "http_headers": "single root HEAD only when explicitly enabled and confirmed"}}
     jp, mp = write_report(report, ns.out, f"{ns.profile}_{root.replace('.', '_')}")
     print(f"[+] JSON : {jp}\n[+] Markdown : {mp}")
     return report
