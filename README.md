@@ -26,17 +26,19 @@ Mode Meesho verrouillé (aucune collecte réseau avec la configuration initiale)
 python main.py --profile meesho_root --config config.json --modules all --out reports
 ```
 
-Analyse JavaScript locale (hors ligne) :
+Analyse JavaScript locale : sans `--js-base-url`, les chemins relatifs restent tels quels. Une URL de base explicite n'est acceptée que si son hôte appartient au périmètre du profil.
 
 ```powershell
 python main.py --profile meesho_root --config config.json --modules js --js fixtures/js/sample.js --out reports
 ```
 
-Profil de laboratoire : modifier `profiles.lab.root_domain` dans `config.json` pour y mettre le domaine exact détenu ou expressément autorisé. DNS, HTTP et CT sont désactivés par défaut dans le profil modèle ; activer seulement les modules couverts par l'autorisation.
+Pour normaliser les chemins relatifs d'un script local réellement issu d'un hôte du périmètre, indique son URL de base exacte :
 
 ```powershell
-python main.py --profile lab --config config.json --modules dns,headers --confirm-authorized --out reports
+python main.py --profile lab --config config.json --modules js --js .\app.js --js-base-url https://example.com/assets/app.js --out reports
 ```
+
+Profil de laboratoire : modifier `profiles.lab.root_domain` dans `config.json` pour y mettre le domaine exact détenu ou expressément autorisé. DNS, HTTP et CT sont désactivés par défaut dans le profil modèle ; activer seulement les modules couverts par l'autorisation.
 
 ## Sécurité et limites
 
