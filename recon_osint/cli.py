@@ -10,6 +10,8 @@ from .modules.subdomains import crtsh_passive
 from .modules.dns import resolve_dns
 from .modules.headers import analyze_headers
 from .modules.javascript import analyze_javascript
+from .integrations.orchestrator import check_tools, run_pipeline
+import json
 
 def _validate_js_base_url(value: str, profile: dict) -> str:
     parsed = urlparse(value)
@@ -31,11 +33,19 @@ def build_parser():
     p.add_argument("--js", action="append", default=[], help="Fichier JavaScript local à analyser (analyse hors ligne)")
     p.add_argument("--js-base-url", help="URL de base explicite, dans le périmètre, pour résoudre les chemins relatifs du JS")
     p.add_argument("--modules", default="all", help="Liste séparée par virgules: ct,dns,headers,js ou all")
-    p.add_argument("--confirm-authorized", action="store_true", help="Confirme que tu es autorisé à effectuer les requêtes actives configurées")
+    p.add_argument("--confirm-authorized", action="store_true", help="Confirme que tu es autorisé à lancer les outils externes configurés")
+    p.add_argument("--run-integrations", action="store_true", help="Lance uniquement les intégrations explicitement activées dans le profil")
+    p.add_argument("--check-tools", action="store_true", help="Vérifie la présence des outils externes sans lancer de scan")
+    p.add_argument("--source-dir", help="Dossier de code local à analyser avec Semgrep ou Gitleaks")
+    p.add_argument("--semgrep-config", help="Fichier ou dossier local de règles Semgrep")
     return p
 
 def run(args=None):
     ns = build_parser().parse_args(args)
+    if ns.check_tools:
+        print(json.dumps(check_tools(), ensure_ascii=False, indent=2))
+        if not ns.run_integrations:
+            return {"tool_checks": check_tools()}
     cfg = load_config(ns.config); profile = get_profile(cfg, ns.profile)
     root = normalize_host(ns.domain or profile.get("root_domain", ""))
     validate_target(root, profile)
@@ -75,8 +85,15 @@ def run(args=None):
         "hôtes DNS examinés": len(results.get("dns", [])) if isinstance(results.get("dns"), list) else 0,
         "indicateurs JavaScript": sum(x.get("analysis", {}).get("counts", {}).get("secret_indicators", 0) for x in results.get("javascript", [])),
     }
-    report = {"version": "4.0.0", "profile": ns.profile, "root_domain": root, "mode": profile.get("mode", "unknown"), "modules_requested": sorted(modules), "summary": summary, "results": results,
+    report = {"version": "4.1.0", "profile": ns.profile, "root_domain": root, "mode": profile.get("mode", "unknown"), "modules_requested": sorted(modules), "summary": summary, "results": results,
               "safety": {"no_exploitation": True, "no_fuzzing": True, "javascript_analysis": "local_only", "http_headers": "single root HEAD only when explicitly enabled and confirmed"}}
+    if ns.run_integrations:
+        report["integrations"] = run_pipeline(
+            profile, root, Path(ns.out) / "integrations",
+            confirm_authorized=ns.confirm_authorized,
+            source_dir=ns.source_dir,
+            semgrep_config=ns.semgrep_config,
+        )
     jp, mp = write_report(report, ns.out, f"{ns.profile}_{root.replace('.', '_')}")
     print(f"[+] JSON : {jp}\n[+] Markdown : {mp}")
     return report
