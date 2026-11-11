@@ -37,7 +37,7 @@ def _is_expected_binary(tool: str, binary: str) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    help_text = ((result.stdout or "") + "\\n" + (result.stderr or "")).lower()
+    help_text = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
     return all(marker.lower() in help_text for marker in markers)
 
 def check_tools() -> dict[str, dict[str, str]]:
