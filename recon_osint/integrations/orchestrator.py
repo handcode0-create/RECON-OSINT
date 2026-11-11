@@ -22,7 +22,7 @@ _TOOL_SIGNATURES = {
     "httpx": (["-h"], ["http toolkit", "-td", "-sc"]),
     "katana": (["-h"], ["crawling and spidering", "-jsonl", "-fs"]),
     "semgrep": (["--help"], ["semgrep", "scan"]),
-    "gitleaks": (["--help"], ["gitleaks", "dir", "--report-format"]),
+    "gitleaks": (["dir", "--help"], ["--report-format", "--report-path"]),
 }
 
 @lru_cache(maxsize=32)
