@@ -20,7 +20,7 @@ _TOOL_SIGNATURES = {
     "gau": (["--help"], ["--providers", "--threads"]),
     "dnsx": (["-h"], ["dnsx", "-aaaa", "-a"]),
     "httpx": (["-h"], ["http toolkit", "-td", "-sc"]),
-    "katana": (["-h"], ["crawling and spidering", "-jsonl", "-fs"]),
+    "katana": (["-h"], ["katana is a fast crawler", "-jsonl", "-field-scope"]),
     "semgrep": (["--help"], ["semgrep", "scan"]),
     "gitleaks": (["dir", "--help"], ["--report-format", "--report-path"]),
 }
