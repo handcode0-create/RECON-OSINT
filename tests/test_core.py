@@ -17,9 +17,21 @@ class CoreTests(unittest.TestCase):
         p = {"root_domain": "example.com", "include_subdomains": False}
         with self.assertRaises(ScopeError): validate_target("www.example.com", p)
 
-    def test_scope_rejects_ip_addresses(self):
+    def test_scope_accepts_only_the_exact_ip_address(self):
+        profile = {"root_domain": "192.0.2.10", "include_subdomains": False}
+        self.assertEqual(validate_target("192.0.2.10", profile), "192.0.2.10")
         with self.assertRaises(ScopeError):
-            validate_target("127.0.0.1", {"root_domain": "127.0.0.1", "include_subdomains": False})
+            validate_target("192.0.2.11", profile)
+        with self.assertRaises(ScopeError):
+            validate_target("example.com", profile)
+
+    def test_target_parser_accepts_domain_url_and_ip(self):
+        from recon_osint.core.scope import parse_target_input
+        self.assertEqual(parse_target_input("https://example.com/app?token=hidden#top"),
+            ("example.com", "https://example.com/app", 443))
+        self.assertEqual(parse_target_input("http://192.0.2.5:8080/login"),
+            ("192.0.2.5", "http://192.0.2.5:8080/login", 8080))
+        self.assertEqual(parse_target_input("2001:db8::1")[0], "2001:db8::1")
 
     def test_javascript_keeps_relative_paths_without_explicit_base(self):
         out = analyze_javascript('fetch("/api/items?page=2&sort=asc");')
