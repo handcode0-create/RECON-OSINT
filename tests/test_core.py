@@ -16,6 +16,10 @@ class CoreTests(unittest.TestCase):
         p = {"root_domain": "example.com", "include_subdomains": False}
         with self.assertRaises(ScopeError): validate_target("www.example.com", p)
 
+    def test_scope_rejects_ip_addresses(self):
+        with self.assertRaises(ScopeError):
+            validate_target("127.0.0.1", {"root_domain": "127.0.0.1", "include_subdomains": False})
+
     def test_javascript_extraction_and_secret_redaction(self):
         src = 'fetch("/api/items?page=2&sort=asc"); const api_key="EXAMPLE_NOT_A_REAL_SECRET_VALUE_12345";'
         out = analyze_javascript(src, "https://example.com/")
@@ -34,5 +38,6 @@ class CoreTests(unittest.TestCase):
         cfg = load_config(Path(__file__).parents[1] / "config.json")
         self.assertEqual(get_profile(cfg, "meesho_root")["allowed_sources"], [])
         self.assertFalse(get_profile(cfg, "meesho_root")["active_http_enabled"])
+        self.assertFalse(get_profile(cfg, "lab")["active_http_enabled"])
 
 if __name__ == "__main__": unittest.main()
