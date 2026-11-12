@@ -13,6 +13,26 @@ from .modules.javascript import analyze_javascript
 from .integrations.orchestrator import check_tools, run_pipeline
 import json
 
+def _enforce_target_profile_policy(profile_name: str, root: str) -> None:
+    normalized = root.strip().rstrip(".").lower()
+    if profile_name != "meesho_root" and (normalized == "meesho.com" or normalized.endswith(".meesho.com")):
+        raise ScopeError("Cible Meesho protégée : utilisez uniquement le profil meesho_root, qui reste passif et verrouillé. Aucun scan via le profil lab ne sera lancé.")
+
+
+def _analyze_header_response(raw: dict) -> dict:
+    status = raw.get("status")
+    headers = raw.get("headers")
+    if type(status) is not int or not isinstance(headers, dict):
+        return {
+            "response": raw,
+            "analysis": {
+                "status": "skipped",
+                "reason": "Aucune réponse HTTP avec en-têtes fiables ; aucune conclusion de sécurité n'est produite.",
+            },
+        }
+    return {"response": raw, "analysis": analyze_headers(raw)}
+
+
 def _validate_js_base_url(value: str, profile: dict) -> str:
     parsed = urlparse(value)
     if parsed.scheme.lower() not in ({"https"} if profile.get("https_only") else {"http", "https"}):
@@ -56,6 +76,7 @@ def run(args=None):
 
     target_value = ns.target or input("Cible (domaine, URL HTTP(S), IPv4 ou IPv6) : ").strip()
     root, seed_url, target_port = parse_target_input(target_value, https_only=bool(profile.get("https_only", False)))
+    _enforce_target_profile_policy(ns.profile, root)
 
     # Meesho remains tied to its fixed, locked profile. Lab targets are per-run.
     if profile.get("integrations_disabled") is True:
@@ -100,7 +121,7 @@ def run(args=None):
     if "headers" in modules:
         if run_profile.get("active_http_enabled") is True and ns.confirm_authorized and seed_url.lower().startswith("https://") and target_port == 443:
             raw = fetch_headers(root, run_profile, timeout=int(run_profile.get("timeout_seconds", 8)))
-            results["headers"] = {"response": raw, "analysis": analyze_headers(raw)}
+            results["headers"] = _analyze_header_response(raw)
         else: results["headers"] = {"status": "skipped", "reason": "Ce contrôle HEAD est limité à HTTPS/443 ; utilisez l'intégration HTTPX pour les autres schémas/ports."}
     if "js" in modules:
         local = []
