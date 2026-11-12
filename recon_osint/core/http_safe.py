@@ -6,10 +6,8 @@ from urllib.request import HTTPRedirectHandler, build_opener, Request
 from urllib.error import URLError, HTTPError
 from .scope import validate_target, ScopeError
 
-def _assert_public_resolution(host: str, profile: dict | None = None) -> None:
+def _assert_public_resolution(host: str) -> None:
     """Reject private, loopback, link-local and otherwise non-global resolutions."""
-    if profile and (profile.get("allow_private_targets") is True or profile.get("unrestricted") is True):
-        return
     infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     addresses = {item[4][0] for item in infos}
     if not addresses:
@@ -25,10 +23,10 @@ class _ScopedRedirect(HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         parsed = urlparse(newurl)
-        if self.profile.get("unrestricted") is not True and (parsed.scheme.lower() != "https" or parsed.port not in (None, 443) or parsed.username or parsed.password):
+        if parsed.scheme.lower() != "https" or parsed.port not in (None, 443) or parsed.username or parsed.password:
             raise ScopeError("Redirection bloquée: HTTPS standard obligatoire.")
         host = validate_target(parsed.hostname or "", self.profile)
-        _assert_public_resolution(host, self.profile)
+        _assert_public_resolution(host)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 def fetch_headers(host: str, profile: dict, timeout: int = 8) -> dict:
@@ -37,7 +35,7 @@ def fetch_headers(host: str, profile: dict, timeout: int = 8) -> dict:
     if profile.get("active_http_enabled") is not True:
         return {"host": host, "status": "skipped", "reason": "active_http_enabled=false"}
     try:
-        _assert_public_resolution(host, profile)
+        _assert_public_resolution(host)
         url = f"https://{host}/"
         req = Request(url, headers={"User-Agent": "RECON-OSINT/4.0 (+authorized-security-inventory)"}, method="HEAD")
         opener = build_opener(_ScopedRedirect(profile))
