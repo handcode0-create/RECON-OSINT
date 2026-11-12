@@ -167,7 +167,9 @@ def _scope_filter_urls(values: list[str], profile: dict, limit: int, *, require_
         except ValueError:
             continue
         allowed_port = profile.get("target_port")
-        if allowed_port is None:
+        if profile.get("unrestricted") is True:
+            pass  # tous les ports acceptés
+        elif allowed_port is None:
             if actual_port not in (80, 443):
                 continue
         elif actual_port != int(allowed_port):
@@ -245,7 +247,7 @@ def run_pipeline(
         elif profile.get("allow_passive_integrations") is not True:
             skipped("subfinder", "allow_passive_integrations=true requis dans le profil.")
         else:
-            result = _execute("subfinder", ["-d", root, "-silent", "-max-time", "1", "-timeout", "10"], directory, 75)
+            result = _execute("subfinder", ["-d", root, "-silent", "-max-time", str(int(profile.get("subfinder_max_time", 1))), "-timeout", "10"], directory, int(profile.get("subfinder_timeout_seconds", 75)))
             stdout = result.pop("stdout", "")
             names = _scope_filter_hosts(_lines(stdout, max_results), profile, max_hosts)
             result["count"] = len(names)
@@ -269,11 +271,11 @@ def run_pipeline(
             if not providers or not all(p in {"wayback", "commoncrawl", "otx", "urlscan"} for p in providers):
                 skipped("gau", "Liste gau_providers invalide.")
             else:
-                args = ["--threads", "1", "--timeout", "10", "--retries", "0", "--providers", ",".join(providers)]
+                args = ["--threads", str(int(profile.get("gau_threads", 1))), "--timeout", "10", "--retries", "0", "--providers", ",".join(providers)]
                 if profile.get("include_subdomains") is True:
                     args.append("--subs")
                 args.append(root)
-                result = _execute("gau", args, directory, 90)
+                result = _execute("gau", args, directory, int(profile.get("gau_timeout_seconds", 90)))
                 stdout = result.pop("stdout", "")
                 archived_urls = _scope_filter_urls(_lines(stdout, max_urls), profile, max_urls)
                 result["count"] = len(archived_urls)
@@ -292,8 +294,8 @@ def run_pipeline(
         else:
             host_file = directory / "dns-input.txt"
             host_file.write_text("\n".join(hosts[:int(profile.get("max_hosts", 50))]), encoding="utf-8")
-            args = ["-l", str(host_file), "-a", "-aaaa", "-cname", "-j", "-silent", "-t", "1", "-rl", "1"]
-            result = _execute("dnsx", args, directory, 60)
+            args = ["-l", str(host_file), "-a", "-aaaa", "-cname", "-j", "-silent", "-t", str(int(profile.get("dns_threads", 1))), "-rl", str(int(profile.get("dns_rate", 1)))]
+            result = _execute("dnsx", args, directory, int(profile.get("dnsx_timeout_seconds", 60)))
             stdout = result.pop("stdout", "")
             rows = _jsonl(stdout)
             result["records"] = rows[:int(profile.get("max_results", 100))]
@@ -326,7 +328,7 @@ def run_pipeline(
                 host_file.write_text("\n".join(web_inputs), encoding="utf-8")
                 args = [
                     "-l", str(host_file), "-json", "-silent", "-sc", "-title", "-td", "-server", "-ip", "-cname",
-                    "-rl", "1", "-threads", "1", "-timeout", "5", "-retries", "0",
+                    "-rl", str(int(profile.get("httpx_rate", 1))), "-threads", str(int(profile.get("httpx_threads", 1))), "-timeout", "5", "-retries", "0",
                 ]
                 result = _execute("httpx", args, directory, int(profile.get("httpx_timeout_seconds", 120)))
                 stdout = result.pop("stdout", "")
@@ -351,9 +353,13 @@ def run_pipeline(
             url_file = directory / "katana-input.txt"
             url_file.write_text("\n".join(alive_urls), encoding="utf-8")
             args = [
-                "-list", str(url_file), "-jsonl", "-silent", "-d", "2", "-c", "1", "-p", "1",
-                "-rl", "1", "-rlm", "20", "-jc", "-fs", "fqdn", "-ct", "30s", "-mrs", "1048576",
+                "-list", str(url_file), "-jsonl", "-silent", "-d", str(int(profile.get("katana_depth", 2))),
+                "-c", str(int(profile.get("katana_concurrency", 1))), "-p", str(int(profile.get("katana_concurrency", 1))),
+                "-rl", str(int(profile.get("katana_rate", 1))), "-jc",
+                "-fs", "rdn" if profile.get("include_subdomains") is True else "fqdn", "-ct", "30s", "-mrs", "1048576",
             ]
+            if int(profile.get("katana_rate_minute", 20)) > 0:
+                args += ["-rlm", str(int(profile.get("katana_rate_minute", 20)))]
             result = _execute("katana", args, directory, int(profile.get("katana_timeout_seconds", 90)))
             stdout = result.pop("stdout", "")
             rows = _jsonl(stdout)

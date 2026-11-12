@@ -25,16 +25,18 @@
       "gitleaks_timeout_seconds": 120
     },
     "lab": {
-      "description": "Profil universel : domaine, URL ou IP saisi à chaque exécution. Les outils compatibles sont activés ; sous-domaines et cibles IP privées nécessitent une option explicite au lancement.",
+      "description": "Profil universel sans restriction : domaine, URL ou IP saisi à chaque exécution ; sous-domaines, IP privées, tous ports et tous outils activés.",
       "root_domain": "",
-      "include_subdomains": false,
+      "include_subdomains": true,
       "mode": "authorized_lab",
-      "allowed_sources": [],
+      "allowed_sources": [
+        "crtsh"
+      ],
       "dns_enabled": true,
       "active_http_enabled": true,
       "https_only": false,
-      "max_results": 300,
-      "max_hosts": 20,
+      "max_results": 100000,
+      "max_hosts": 100000,
       "timeout_seconds": 8,
       "integrations_disabled": false,
       "allow_passive_integrations": true,
@@ -48,14 +50,33 @@
         "gitleaks"
       ],
       "active_crawl_enabled": true,
-      "max_urls": 300,
-      "max_web_targets": 3,
-      "httpx_timeout_seconds": 60,
-      "katana_timeout_seconds": 60,
-      "semgrep_timeout_seconds": 180,
-      "gitleaks_timeout_seconds": 180,
-      "allow_private_targets": false,
-      "target_port": null
+      "max_urls": 100000,
+      "max_web_targets": 100000,
+      "httpx_timeout_seconds": 1800,
+      "katana_timeout_seconds": 1800,
+      "semgrep_timeout_seconds": 1800,
+      "gitleaks_timeout_seconds": 1800,
+      "allow_private_targets": true,
+      "target_port": null,
+      "unrestricted": true,
+      "gau_providers": [
+        "wayback",
+        "commoncrawl",
+        "otx",
+        "urlscan"
+      ],
+      "subfinder_max_time": 10,
+      "httpx_rate": 150,
+      "httpx_threads": 50,
+      "dns_threads": 100,
+      "dns_rate": 200,
+      "katana_depth": 3,
+      "katana_concurrency": 10,
+      "katana_rate": 100,
+      "katana_rate_minute": 0,
+      "subfinder_timeout_seconds": 600,
+      "gau_timeout_seconds": 600,
+      "dnsx_timeout_seconds": 600
     }
   }
 }

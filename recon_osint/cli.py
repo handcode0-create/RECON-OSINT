@@ -10,7 +10,8 @@ from .modules.subdomains import crtsh_passive
 from .modules.dns import resolve_dns
 from .modules.headers import analyze_headers
 from .modules.javascript import analyze_javascript
-from .integrations.orchestrator import check_tools, run_pipeline
+from .modules.waf import detect_waf
+from .integrations.orchestrator import check_tools, run_pipeline, SUPPORTED_TOOLS
 import json
 
 def _enforce_target_profile_policy(profile_name: str, root: str) -> None:
@@ -46,6 +47,28 @@ def _validate_js_base_url(value: str, profile: dict) -> str:
         raise ScopeError("L'URL de base JS doit rester sur le port de la cible fournie.")
     return value
 
+def _select_tools(spec: str, available: tuple[str, ...]) -> list[str]:
+    """Résout --tools : 'all', 'ask' (menu interactif) ou liste séparée par virgules."""
+    spec = spec.strip().lower()
+    if spec == "all":
+        return list(available)
+    if spec == "ask":
+        print("Outils disponibles :")
+        for i, name in enumerate(available, 1):
+            print(f"  {i}. {name}")
+        raw = input("Choix (numéros ou noms séparés par des virgules, 'all' pour tout) : ").strip().lower()
+        if raw == "all":
+            return list(available)
+        chosen = []
+        for part in (x.strip() for x in raw.split(",") if x.strip()):
+            chosen.append(available[int(part) - 1] if part.isdigit() and 1 <= int(part) <= len(available) else part)
+        spec = ",".join(chosen)
+    names = [x.strip() for x in spec.split(",") if x.strip()]
+    unknown = sorted(set(names) - set(available))
+    if unknown:
+        raise SystemExit(f"[!] Outils inconnus : {', '.join(unknown)}. Disponibles : {', '.join(available)}")
+    return list(dict.fromkeys(names))
+
 def build_parser():
     p = argparse.ArgumentParser(prog="recon-osint", description="RECON OSINT V4.2 — scanner universel à cible saisie à chaque exécution")
     p.add_argument("--config", default="config.json")
@@ -56,9 +79,11 @@ def build_parser():
     p.add_argument("--out", default="reports")
     p.add_argument("--js", action="append", default=[], help="Fichier JavaScript local à analyser (analyse hors ligne)")
     p.add_argument("--js-base-url", help="URL de base explicite, dans le périmètre, pour résoudre les chemins relatifs du JS")
-    p.add_argument("--modules", default="all", help="Liste séparée par virgules: ct,dns,headers,js ou all")
+    p.add_argument("--modules", default="all", help="Liste séparée par virgules: ct,dns,headers,js,waf ou all")
     p.add_argument("--confirm-authorized", action="store_true", help="Confirme que tu es autorisé à lancer les outils externes configurés")
     p.add_argument("--run-integrations", action="store_true", help="Lance uniquement les intégrations explicitement activées dans le profil")
+    p.add_argument("--tools", help="Outils à lancer : liste séparée par virgules (ex: subfinder,httpx), 'all' ou 'ask' (menu interactif). Défaut : ceux du profil.")
+    p.add_argument("--list-tools", action="store_true", help="Affiche les outils sélectionnables et quitte")
     p.add_argument("--check-tools", action="store_true", help="Vérifie la présence des outils externes sans lancer de scan")
     p.add_argument("--source-dir", help="Dossier de code local à analyser avec Semgrep ou Gitleaks")
     p.add_argument("--semgrep-config", help="Fichier ou dossier local de règles Semgrep")
@@ -66,6 +91,9 @@ def build_parser():
 
 def run(args=None):
     ns = build_parser().parse_args(args)
+    if ns.list_tools:
+        print("Outils disponibles : " + ", ".join(SUPPORTED_TOOLS))
+        return {"tools": list(SUPPORTED_TOOLS)}
     if ns.check_tools:
         print(json.dumps(check_tools(), ensure_ascii=False, indent=2))
         if not ns.run_integrations:
@@ -80,15 +108,26 @@ def run(args=None):
 
     # Meesho remains tied to its fixed, locked profile. Lab targets are per-run.
     if profile.get("integrations_disabled") is True:
+        if ns.tools:
+            raise SystemExit("[!] --tools est ignoré/refusé : ce profil est verrouillé (integrations_disabled). Utilisez --profile lab.")
         validate_target(root, profile)
         run_profile = dict(profile)
     else:
         run_profile = dict(profile)
         run_profile["root_domain"] = root
-        run_profile["include_subdomains"] = bool(ns.include_subdomains)
         run_profile["target_port"] = target_port
-        run_profile["https_only"] = seed_url.lower().startswith("https://")
-        run_profile["allow_private_targets"] = bool(ns.allow_private_target)
+        if run_profile.get("unrestricted") is True:
+            run_profile["include_subdomains"] = True
+            run_profile["allow_private_targets"] = True
+            run_profile["https_only"] = False
+            if not ns.confirm_authorized:
+                ns.confirm_authorized = True  # profil sans restriction : pas de question
+        else:
+            run_profile["include_subdomains"] = bool(ns.include_subdomains)
+            run_profile["https_only"] = seed_url.lower().startswith("https://")
+            run_profile["allow_private_targets"] = bool(ns.allow_private_target)
+        if ns.tools:
+            run_profile["enabled_tools"] = _select_tools(ns.tools, SUPPORTED_TOOLS)
 
     if ns.run_integrations and not ns.confirm_authorized:
         answer = input("Confirmez-vous que vous êtes autorisé à tester cette cible et ce périmètre ? (oui/non) : ").strip().lower()
@@ -98,8 +137,8 @@ def run(args=None):
 
     js_base_url = _validate_js_base_url(ns.js_base_url, run_profile) if ns.js_base_url else ""
     modules = {x.strip().lower() for x in ns.modules.split(",")}
-    if "all" in modules: modules = {"ct", "dns", "headers", "js"}
-    unknown = modules - {"ct", "dns", "headers", "js"}
+    if "all" in modules: modules = {"ct", "dns", "headers", "js", "waf"}
+    unknown = modules - {"ct", "dns", "headers", "js", "waf"}
     if unknown: raise SystemExit(f"Modules inconnus: {', '.join(sorted(unknown))}")
     if run_profile.get("mode") == "passive_only":
         modules -= {"dns", "headers"}
@@ -119,10 +158,15 @@ def run(args=None):
             results["dns"] = [resolve_dns(host) for host in discovered[:int(run_profile.get("max_hosts", 30))]]
         else: results["dns"] = {"status": "skipped", "reason": "dns_enabled et confirmation d'autorisation requis"}
     if "headers" in modules:
-        if run_profile.get("active_http_enabled") is True and ns.confirm_authorized and seed_url.lower().startswith("https://") and target_port == 443:
+        if run_profile.get("active_http_enabled") is True and ns.confirm_authorized and (run_profile.get("unrestricted") is True or (seed_url.lower().startswith("https://") and target_port == 443)):
             raw = fetch_headers(root, run_profile, timeout=int(run_profile.get("timeout_seconds", 8)))
             results["headers"] = _analyze_header_response(raw)
         else: results["headers"] = {"status": "skipped", "reason": "Ce contrôle HEAD est limité à HTTPS/443 ; utilisez l'intégration HTTPX pour les autres schémas/ports."}
+    if "waf" in modules:
+        if run_profile.get("active_http_enabled") is True and ns.confirm_authorized:
+            results["waf"] = detect_waf(seed_url, run_profile, timeout=int(run_profile.get("timeout_seconds", 10)))
+        else:
+            results["waf"] = {"status": "skipped", "reason": "active_http_enabled et confirmation d'autorisation requis"}
     if "js" in modules:
         local = []
         for filename in ns.js:
