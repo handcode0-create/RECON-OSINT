@@ -4,7 +4,7 @@ from recon_osint.core.scope import validate_target, ScopeError
 from recon_osint.modules.javascript import analyze_javascript
 from recon_osint.modules.headers import analyze_headers
 from recon_osint.core.config import load_config, get_profile
-from recon_osint.cli import _validate_js_base_url
+from recon_osint.cli import _validate_js_base_url, _enforce_target_profile_policy, _analyze_header_response
 
 class CoreTests(unittest.TestCase):
     def test_scope_root_and_subdomain(self):
@@ -41,6 +41,24 @@ class CoreTests(unittest.TestCase):
     def test_javascript_resolves_paths_only_with_explicit_base(self):
         out = analyze_javascript('fetch("/api/items?page=2&sort=asc");', "https://example.com/app.js")
         self.assertIn("https://example.com/api/items?page=2&sort=asc", out["endpoints"])
+
+    def test_meesho_target_requires_locked_profile(self):
+        for target in ("meesho.com", "www.meesho.com", "api.meesho.com"):
+            with self.assertRaises(ScopeError):
+                _enforce_target_profile_policy("lab", target)
+        _enforce_target_profile_policy("meesho_root", "meesho.com")
+        _enforce_target_profile_policy("lab", "example.com")
+
+    def test_header_analysis_skips_failed_http_fetch(self):
+        raw = {"host": "example.com", "status": "error", "error": "TimeoutError"}
+        out = _analyze_header_response(raw)
+        self.assertEqual(out["analysis"]["status"], "skipped")
+        self.assertNotIn("findings", out["analysis"])
+
+    def test_header_analysis_accepts_real_http_response(self):
+        raw = {"host": "example.com", "status": 200, "headers": {"Server": "nginx"}}
+        out = _analyze_header_response(raw)
+        self.assertEqual(out["analysis"]["count"], 5)
 
     def test_js_base_url_must_be_in_profile_scope(self):
         profile = {"root_domain": "example.com", "include_subdomains": False, "https_only": True}
