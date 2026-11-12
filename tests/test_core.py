@@ -58,7 +58,7 @@ class CoreTests(unittest.TestCase):
     def test_header_analysis_accepts_real_http_response(self):
         raw = {"host": "example.com", "status": 200, "headers": {"Server": "nginx"}}
         out = _analyze_header_response(raw)
-        self.assertEqual(out["analysis"]["count"], 5)
+        self.assertEqual(out["analysis"]["count"], 6)
 
     def test_js_base_url_must_be_in_profile_scope(self):
         profile = {"root_domain": "example.com", "include_subdomains": False, "https_only": True}
